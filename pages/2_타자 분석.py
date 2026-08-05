@@ -1,16 +1,22 @@
 """
 pages/2_Batter_Rank.py
 ------------------------
-타자 분석: 규정타석 필터, 정렬 가능 테이블, 세이버메트릭스 버블차트,
-주루 4분면 분석, 포지션별 수비율 분포(Violin)
+타자 분석: 규정타석 필터, 순위가 매겨진 테이블, wOBA 랭킹 바차트,
+주루 4분면 분석, 포지션별 수비율 분포(Box Plot)
+
+주: load_data()가 이미 선수-시즌 단위로 포지션 중복 행을 병합해서 반환하므로
+    (예: 좌익수/우익수를 겸한 선수는 def_POS가 '좌익수/우익수' 한 줄로 표기됨)
+    이 페이지에서 별도의 중복 제거 로직은 필요 없다.
 """
 
 import pandas as pd
 import streamlit as st
 import plotly.express as px
+import plotly.graph_objects as go
 
-from utils.data_loader import load_data, get_years
+from utils.data_loader import load_data, get_years, load_position_level_data
 from utils.style import apply_common_layout, COLOR_SEQUENCE
+from utils.glossary import render_glossary
 
 st.set_page_config(page_title="타자 분석", page_icon="🏏", layout="wide")
 
@@ -18,6 +24,7 @@ df = load_data()
 years = get_years(df)
 
 st.title("🏏 타자 분석")
+render_glossary(["hit_AVG", "hit_OBP_est", "hit_SLG", "hit_OPS_est", "hit_wOBA_est", "def_FPCT", "run_SBA", "run_SB_pct", "run_OOB"])
 
 # ---------------------------------------------------------------
 # 필터
@@ -42,27 +49,51 @@ batters = season_df[
 ].copy()
 batters = batters.dropna(subset=["hit_AVG"])
 
-st.caption(f"조건을 만족하는 타자: {batters['player_name'].nunique()}명")
+st.caption(f"조건을 만족하는 타자: {batters['player_name'].nunique()}명 (같은 선수가 여러 포지션을 겸했다면 한 줄로 합쳐서 표기)")
 
 st.divider()
 
 # ---------------------------------------------------------------
-# 정렬 가능한 데이터프레임
+# 순위 테이블
 # ---------------------------------------------------------------
-st.subheader("📋 타자 기록 테이블")
+st.subheader("📋 타자 기록 테이블 (순위)")
+
+rank_options = {
+    "OPS(추정) 높은순": ("hit_OPS_est", False),
+    "타율 높은순": ("hit_AVG", False),
+    "홈런 많은순": ("hit_HR", False),
+    "wOBA(추정) 높은순": ("hit_wOBA_est", False),
+    "이름(가나다순)": ("player_name", True),
+}
+sort_choice = st.selectbox("정렬 기준", options=list(rank_options.keys()))
+rank_col, is_alpha = rank_options[sort_choice]
+
+table_df = batters.copy()
+# '종합순위'는 정렬 기준과 무관하게 항상 OPS(추정) 기준으로 매겨서, 이름순 정렬을 택해도
+# 성적 순위를 함께 참고할 수 있도록 함.
+table_df["종합순위"] = table_df["hit_OPS_est"].rank(ascending=False, method="min").astype("Int64")
+
+if is_alpha:
+    table_df = table_df.sort_values("player_name", ascending=True)
+else:
+    table_df = table_df.sort_values(rank_col, ascending=False)
 
 display_cols = [
-    "player_name", "team", "def_POS", "hit_PA", "hit_AB", "hit_H",
+    "종합순위", "player_name", "team", "def_POS", "hit_PA", "hit_AB", "hit_H",
     "hit_2B", "hit_3B", "hit_HR", "hit_RBI", "hit_AVG",
     "hit_OBP_est", "hit_SLG", "hit_OPS_est", "hit_wOBA_est",
 ]
-display_cols = [c for c in display_cols if c in batters.columns]
+display_cols = [c for c in display_cols if c in table_df.columns]
 
 st.dataframe(
-    batters[display_cols].sort_values("hit_AVG", ascending=False),
+    table_df[display_cols],
     use_container_width=True,
     hide_index=True,
     column_config={
+        "종합순위": st.column_config.NumberColumn("종합순위(OPS 기준)"),
+        "player_name": st.column_config.TextColumn("선수명"),
+        "team": st.column_config.TextColumn("구단"),
+        "def_POS": st.column_config.TextColumn("포지션"),
         "hit_AVG": st.column_config.NumberColumn("타율", format="%.3f"),
         "hit_OBP_est": st.column_config.NumberColumn("출루율(추정)", format="%.3f"),
         "hit_SLG": st.column_config.NumberColumn("장타율", format="%.3f"),
@@ -79,26 +110,30 @@ st.caption(
 st.divider()
 
 # ---------------------------------------------------------------
-# 세이버메트릭스 버블 차트 (OPS/wOBA 추정치, 버블크기 = 타석수)
+# 세이버메트릭스 랭킹 바차트 (wOBA 상위 15명, OPS는 막대 끝 라벨로 함께 표기)
+# 기존 버블차트는 점이 겹쳐 가독성이 떨어져 랭킹 바차트로 교체.
 # ---------------------------------------------------------------
-st.subheader("💠 세이버메트릭스 버블 차트 (wOBA vs OPS, 크기=타석수)")
+st.subheader("💠 세이버메트릭스 랭킹 (wOBA 상위 15명)")
 
-bubble_df = batters.dropna(subset=["hit_wOBA_est", "hit_OPS_est"])
-if not bubble_df.empty:
-    fig_bubble = px.scatter(
-        bubble_df,
-        x="hit_wOBA_est",
-        y="hit_OPS_est",
-        size="hit_PA",
-        color="team",
-        hover_name="player_name",
-        hover_data={"hit_HR": True, "hit_AVG": ":.3f", "hit_PA": True},
-        labels={"hit_wOBA_est": "wOBA(추정)", "hit_OPS_est": "OPS(추정)", "team": "구단"},
-        size_max=45,
-        color_discrete_sequence=COLOR_SEQUENCE,
-    )
-    apply_common_layout(fig_bubble, height=500)
-    st.plotly_chart(fig_bubble, use_container_width=True)
+top_woba = batters.dropna(subset=["hit_wOBA_est", "hit_OPS_est"]).sort_values("hit_wOBA_est", ascending=False).head(15)
+
+if not top_woba.empty:
+    top_woba_sorted = top_woba.sort_values("hit_wOBA_est")  # 가로 막대는 아래->위로 그려지므로 오름차순 정렬
+    fig_bar = go.Figure()
+    fig_bar.add_trace(go.Bar(
+        x=top_woba_sorted["hit_wOBA_est"],
+        y=top_woba_sorted["player_name"],
+        orientation="h",
+        marker_color=COLOR_SEQUENCE[0],
+        text=[f"wOBA {w:.3f} · OPS {o:.3f}" for w, o in zip(top_woba_sorted["hit_wOBA_est"], top_woba_sorted["hit_OPS_est"])],
+        textposition="outside",
+        name="wOBA(추정)",
+    ))
+    fig_bar.update_xaxes(title="wOBA(추정)")
+    fig_bar.update_layout(margin=dict(r=160))  # 막대 끝 텍스트 라벨 공간 확보
+    apply_common_layout(fig_bar, height=520)
+    st.plotly_chart(fig_bar, use_container_width=True)
+    st.caption("막대 끝 라벨에 wOBA(추정)와 OPS(추정)를 함께 표기했습니다.")
 else:
     st.info("표시할 데이터가 부족합니다.")
 
@@ -139,26 +174,32 @@ else:
 st.divider()
 
 # ---------------------------------------------------------------
-# 포지션별 수비율 분포 (Violin Plot)
+# 포지션별 수비율 분포 (Box Plot)
+# 기존 Violin Plot은 겹치는 밀도 곡선 때문에 가독성이 떨어져 Box Plot으로 교체.
+# 포지션별 세분화가 필요하므로 포지션 단위 원본(load_position_level_data)을 사용.
 # ---------------------------------------------------------------
 st.subheader("🧤 포지션별 수비율(FPCT) 분포")
 
-def_df = season_df.dropna(subset=["def_FPCT", "def_POS"])
+position_df = load_position_level_data()
+def_season_df = position_df[position_df["year"] == selected_year]
+def_df = def_season_df.dropna(subset=["def_FPCT", "def_POS"])
 def_df = def_df[(def_df["def_POS"] != "") & (def_df["def_POS"] != "투수")]
 
 if not def_df.empty:
-    fig_violin = px.violin(
+    # 중앙값이 높은 포지션 순으로 정렬해 비교가 쉽도록 함
+    order = def_df.groupby("def_POS")["def_FPCT"].median().sort_values(ascending=False).index.tolist()
+    fig_box = px.box(
         def_df,
         x="def_POS",
         y="def_FPCT",
         color="def_POS",
-        box=True,
+        category_orders={"def_POS": order},
         points="outliers",
         labels={"def_POS": "포지션", "def_FPCT": "수비율"},
         color_discrete_sequence=COLOR_SEQUENCE,
     )
-    fig_violin.update_layout(showlegend=False)
-    apply_common_layout(fig_violin, height=500)
-    st.plotly_chart(fig_violin, use_container_width=True)
+    fig_box.update_layout(showlegend=False)
+    apply_common_layout(fig_box, height=480)
+    st.plotly_chart(fig_box, use_container_width=True)
 else:
     st.info("수비율 데이터가 부족합니다.")
