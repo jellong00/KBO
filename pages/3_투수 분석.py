@@ -1,7 +1,7 @@
 """
 pages/3_Pitcher_Rank.py
 -------------------------
-투수 분석: 규정이닝 필터, 정렬 가능 테이블, 이닝당 삼진 vs 피안타/피홈런
+투수 분석: 규정이닝 필터, 순위가 매겨진 테이블, 이닝당 삼진 vs 피안타/피홈런
 혼합 차트(Bar+Scatter), 탈삼진-볼넷-ERA 3D 산점도
 """
 
@@ -12,6 +12,7 @@ from plotly.subplots import make_subplots
 
 from utils.data_loader import load_data, get_years
 from utils.style import apply_common_layout, COLOR_SEQUENCE
+from utils.glossary import render_glossary
 
 st.set_page_config(page_title="투수 분석", page_icon="🎯", layout="wide")
 
@@ -19,6 +20,7 @@ df = load_data()
 years = get_years(df)
 
 st.title("🎯 투수 분석")
+render_glossary(["pit_ERA", "pit_WHIP", "pit_IP", "pit_K9", "pit_BB9", "pit_HR9", "pit_SO", "pit_BB"])
 
 # ---------------------------------------------------------------
 # 필터
@@ -28,7 +30,7 @@ with col_a:
     selected_year = st.selectbox("시즌 선택", options=years, index=len(years) - 1)
 
 season_df = df[df["year"] == selected_year].copy()
-season_df = season_df[season_df["def_POS"] == "투수"].dropna(subset=["pit_IP"])
+season_df = season_df[season_df["def_POS"].str.contains("투수", na=False)].dropna(subset=["pit_IP"])
 max_ip = float(season_df["pit_IP"].max()) if not season_df.empty else 0.0
 
 with col_b:
@@ -48,21 +50,43 @@ st.caption(f"조건을 만족하는 투수: {pitchers['player_name'].nunique()}�
 st.divider()
 
 # ---------------------------------------------------------------
-# 정렬 가능한 데이터프레임
+# 순위 테이블
 # ---------------------------------------------------------------
-st.subheader("📋 투수 기록 테이블")
+st.subheader("📋 투수 기록 테이블 (순위)")
+
+rank_options = {
+    "ERA 낮은순": ("pit_ERA", False, True),      # (컬럼, 이름정렬여부, ascending)
+    "WHIP 낮은순": ("pit_WHIP", False, True),
+    "탈삼진 많은순": ("pit_SO", False, False),
+    "승수 많은순": ("pit_W", False, False),
+    "이름(가나다순)": ("player_name", True, True),
+}
+sort_choice = st.selectbox("정렬 기준", options=list(rank_options.keys()))
+rank_col, is_alpha, ascending = rank_options[sort_choice]
+
+table_df = pitchers.copy()
+# '종합순위'는 정렬 기준과 무관하게 ERA(낮을수록 우수) 기준으로 항상 매김
+table_df["종합순위"] = table_df["pit_ERA"].rank(ascending=True, method="min").astype("Int64")
+
+if is_alpha:
+    table_df = table_df.sort_values("player_name", ascending=True)
+else:
+    table_df = table_df.sort_values(rank_col, ascending=ascending)
 
 display_cols = [
-    "player_name", "team", "pit_IP", "pit_W", "pit_L", "pit_SV", "pit_HLD",
+    "종합순위", "player_name", "team", "pit_IP", "pit_W", "pit_L", "pit_SV", "pit_HLD",
     "pit_ERA", "pit_WHIP", "pit_SO", "pit_BB", "pit_H", "pit_HR",
 ]
-display_cols = [c for c in display_cols if c in pitchers.columns]
+display_cols = [c for c in display_cols if c in table_df.columns]
 
 st.dataframe(
-    pitchers[display_cols].sort_values("pit_ERA", ascending=True),
+    table_df[display_cols],
     use_container_width=True,
     hide_index=True,
     column_config={
+        "종합순위": st.column_config.NumberColumn("종합순위(ERA 기준)"),
+        "player_name": st.column_config.TextColumn("선수명"),
+        "team": st.column_config.TextColumn("구단"),
         "pit_IP": st.column_config.NumberColumn("이닝(IP)", format="%.1f"),
         "pit_ERA": st.column_config.NumberColumn("ERA", format="%.2f"),
         "pit_WHIP": st.column_config.NumberColumn("WHIP", format="%.2f"),
@@ -82,6 +106,7 @@ mix_df = mix_df.sort_values("pit_K9", ascending=False).head(20)
 if not mix_df.empty:
     fig_mix = make_subplots(specs=[[{"secondary_y": True}]])
 
+    # pit_K9 = 탈삼진 / 이닝 * 9 (9이닝당 탈삼진 개수)
     fig_mix.add_trace(
         go.Bar(
             x=mix_df["player_name"],
@@ -126,6 +151,7 @@ st.divider()
 # 3D 산점도: 탈삼진 vs 볼넷 vs ERA
 # ---------------------------------------------------------------
 st.subheader("🌐 투수 구위 분석 (3D: 탈삼진 · 볼넷 · ERA)")
+st.caption("ERA(평균자책점)는 낮을수록 우수하므로 z축을 반전시켜, 그래프 아래쪽일수록 우수한 투수입니다.")
 
 three_d_df = pitchers.dropna(subset=["pit_SO", "pit_BB", "pit_ERA"])
 
