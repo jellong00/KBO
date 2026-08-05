@@ -29,15 +29,26 @@ def apply_common_layout(fig, title=None, height=480, legend_title=None):
             bordercolor="#E5E7EB",
         ),
         legend=dict(
-            title=legend_title,
+            title=dict(
+                text=legend_title,
+                font=dict(color="#111827", size=12, family=FONT_FAMILY),
+            ),
             orientation="h",
             yanchor="bottom", y=1.02,
             xanchor="right", x=1,
             bgcolor="rgba(0,0,0,0)",
+            # 기본 템플릿에서 범례 글자가 연한 회색으로 나와 잘 안 보이는 문제 수정:
+            # 범례 항목 폰트 색을 진한 색으로 명시적으로 고정.
+            font=dict(color="#111827", size=12, family=FONT_FAMILY),
         ),
         plot_bgcolor="white",
         paper_bgcolor="white",
         colorway=COLOR_SEQUENCE,
+        # color_continuous_scale을 쓰는 차트(예: 주루 4분면)의 컬러바 글자색도 함께 고정
+        coloraxis_colorbar=dict(
+            tickfont=dict(color="#111827", size=11, family=FONT_FAMILY),
+            title=dict(font=dict(color="#111827", size=12, family=FONT_FAMILY)),
+        ),
     )
     fig.update_xaxes(showgrid=True, gridcolor="#F1F5F9", zeroline=False)
     fig.update_yaxes(showgrid=True, gridcolor="#F1F5F9", zeroline=False)
