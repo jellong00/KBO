@@ -12,6 +12,7 @@ import plotly.graph_objects as go
 
 from utils.data_loader import load_data, get_years
 from utils.style import apply_common_layout, COLOR_SEQUENCE
+from utils.glossary import STAT_GLOSSARY, render_glossary
 
 st.set_page_config(page_title="1:1 선수 비교", page_icon="⚔️", layout="wide")
 
@@ -19,22 +20,28 @@ df = load_data()
 years = get_years(df)
 
 st.title("⚔️ 1:1 선수 비교 (Head-to-Head)")
+render_glossary(["hit_AVG", "hit_HR", "hit_RBI", "hit_OBP_est", "hit_SLG", "hit_OPS_est", "hit_wOBA_est",
+                  "pit_ERA", "pit_WHIP", "pit_W", "pit_SV", "pit_SO", "pit_BB"])
 
 selected_year = st.selectbox("비교 시즌 선택", options=years, index=len(years) - 1)
 season_df = df[df["year"] == selected_year].copy()
+
+# '출전한 선수'만 후보로 제공: 타자는 타석(hit_PA)이, 투수는 이닝(pit_IP)이 실제로 기록된 선수만 포함
+batter_pool_base = season_df[season_df["hit_PA"] > 0]
+pitcher_pool_base = season_df[(season_df["def_POS"].str.contains("투수", na=False)) & (season_df["pit_IP"] > 0)]
 
 col1, col2, col3 = st.columns([2, 1, 2])
 
 with col1:
     st.subheader("선수 A")
     pos_a = st.radio("포지션 유형 A", options=["타자", "투수"], horizontal=True, key="pos_a")
-    pool_a = season_df[season_df["def_POS"] != "투수"] if pos_a == "타자" else season_df[season_df["def_POS"] == "투수"]
+    pool_a = batter_pool_base if pos_a == "타자" else pitcher_pool_base
     player_a = st.selectbox("선수 선택 A", options=sorted(pool_a["player_name"].dropna().unique()), key="player_a")
 
 with col3:
     st.subheader("선수 B")
     pos_b = st.radio("포지션 유형 B", options=["타자", "투수"], horizontal=True, key="pos_b")
-    pool_b = season_df[season_df["def_POS"] != "투수"] if pos_b == "타자" else season_df[season_df["def_POS"] == "투수"]
+    pool_b = batter_pool_base if pos_b == "타자" else pitcher_pool_base
     player_b = st.selectbox("선수 선택 B", options=sorted(pool_b["player_name"].dropna().unique()), key="player_b")
 
 with col2:
@@ -91,8 +98,8 @@ row_b = get_row(pool_b, player_b)
 is_pitcher_a = pos_a == "투수"
 is_pitcher_b = pos_b == "투수"
 
-cohort_a = season_df[season_df["def_POS"] == "투수"] if is_pitcher_a else season_df[season_df["def_POS"] != "투수"]
-cohort_b = season_df[season_df["def_POS"] == "투수"] if is_pitcher_b else season_df[season_df["def_POS"] != "투수"]
+cohort_a = pitcher_pool_base if is_pitcher_a else batter_pool_base
+cohort_b = pitcher_pool_base if is_pitcher_b else batter_pool_base
 
 labels_a, values_a = build_radar_values(row_a, is_pitcher_a, cohort_a)
 labels_b, values_b = build_radar_values(row_b, is_pitcher_b, cohort_b)
@@ -127,7 +134,10 @@ if labels_a and labels_b:
         fillcolor="rgba(249, 115, 22, 0.25)",
     ))
     fig.update_layout(
-        polar=dict(radialaxis=dict(visible=True, range=[0, 100], ticksuffix="%")),
+        polar=dict(
+            radialaxis=dict(visible=True, range=[0, 100], ticksuffix="%", tickfont=dict(color="#374151")),
+            angularaxis=dict(tickfont=dict(color="#111827", size=12)),
+        ),
     )
     apply_common_layout(fig, title=f"{player_a} vs {player_b} ({selected_year})", height=550)
     st.plotly_chart(fig, use_container_width=True)
@@ -137,21 +147,31 @@ else:
 st.divider()
 
 # ---------------------------------------------------------------
-# 기본 성적 비교 테이블
+# 기본 성적 비교 테이블 (컬럼명을 한글 라벨로 변환해서 표시)
 # ---------------------------------------------------------------
 st.subheader("📋 기본 성적 비교")
 
 compare_cols_batter = ["hit_AVG", "hit_HR", "hit_RBI", "hit_OBP_est", "hit_SLG", "hit_OPS_est", "hit_wOBA_est"]
 compare_cols_pitcher = ["pit_ERA", "pit_WHIP", "pit_W", "pit_L", "pit_SV", "pit_SO", "pit_BB"]
 
+
+def korean_label(col):
+    """glossary에 등록된 한글 표시명을 가져오고, 없으면 원래 컬럼명을 그대로 사용."""
+    return STAT_GLOSSARY[col][0] if col in STAT_GLOSSARY else col
+
+
 col_left, col_right = st.columns(2)
 with col_left:
     st.markdown(f"**{player_a}**")
     cols = compare_cols_pitcher if is_pitcher_a else compare_cols_batter
     if row_a is not None:
-        st.dataframe(row_a[cols].to_frame(name=player_a), use_container_width=True)
+        table = row_a[cols].to_frame(name=player_a)
+        table.index = [korean_label(c) for c in table.index]
+        st.dataframe(table, use_container_width=True)
 with col_right:
     st.markdown(f"**{player_b}**")
     cols = compare_cols_pitcher if is_pitcher_b else compare_cols_batter
     if row_b is not None:
-        st.dataframe(row_b[cols].to_frame(name=player_b), use_container_width=True)
+        table = row_b[cols].to_frame(name=player_b)
+        table.index = [korean_label(c) for c in table.index]
+        st.dataframe(table, use_container_width=True)
