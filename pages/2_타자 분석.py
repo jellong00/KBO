@@ -1,17 +1,23 @@
 """
 pages/2_Batter_Rank.py
 ------------------------
-타자 분석: 규정타석 필터, 순위가 매겨진 테이블, wOBA 랭킹 바차트,
-주루 4분면 분석, 포지션별 수비율 분포(Box Plot)
+타자 분석: 규정타석 필터, 순위가 매겨진 테이블,
+세이버메트릭스 히트맵, 클러치 히팅 랭킹, 대타 스페셜리스트 랭킹,
+도루 성공/실패 스택바, 포지션별 평균 수비율 랭킹.
+
+[2024 데이터 업데이트 반영]
+- 출루율/장타율/OPS는 이제 대부분 실제 제공값을 사용 (data_loader.py에서 처리)
+- 득점권 타율(hit_RISP), 대타 타율(hit_PH_BA) 등 신규 변수를 활용한 분석 추가
+- 기존 버블차트/4분면 산점도/바이올린 플롯은 모두 "한눈에 들어오는" 차트(히트맵/막대)로 교체
 
 주: load_data()가 이미 선수-시즌 단위로 포지션 중복 행을 병합해서 반환하므로
     (예: 좌익수/우익수를 겸한 선수는 def_POS가 '좌익수/우익수' 한 줄로 표기됨)
     이 페이지에서 별도의 중복 제거 로직은 필요 없다.
 """
 
+import numpy as np
 import pandas as pd
 import streamlit as st
-import plotly.express as px
 import plotly.graph_objects as go
 
 from utils.data_loader import load_data, get_years, load_position_level_data
@@ -24,7 +30,10 @@ df = load_data()
 years = get_years(df)
 
 st.title("🏏 타자 분석")
-render_glossary(["hit_AVG", "hit_OBP_est", "hit_SLG", "hit_OPS_est", "hit_wOBA_est", "def_FPCT", "run_SBA", "run_SB_pct", "run_OOB"])
+render_glossary([
+    "hit_AVG", "hit_OBP_est", "hit_SLG", "hit_OPS_est", "hit_wOBA_est",
+    "hit_RISP", "hit_PH_BA", "def_FPCT", "run_SBA", "run_SB_pct", "run_OOB",
+])
 
 # ---------------------------------------------------------------
 # 필터
@@ -59,17 +68,18 @@ st.divider()
 st.subheader("📋 타자 기록 테이블 (순위)")
 
 rank_options = {
-    "OPS(추정) 높은순": ("hit_OPS_est", False),
+    "OPS 높은순": ("hit_OPS_est", False),
     "타율 높은순": ("hit_AVG", False),
     "홈런 많은순": ("hit_HR", False),
-    "wOBA(추정) 높은순": ("hit_wOBA_est", False),
+    "wOBA 높은순": ("hit_wOBA_est", False),
+    "득점권타율 높은순": ("hit_RISP", False),
     "이름(가나다순)": ("player_name", True),
 }
 sort_choice = st.selectbox("정렬 기준", options=list(rank_options.keys()))
 rank_col, is_alpha = rank_options[sort_choice]
 
 table_df = batters.copy()
-# '종합순위'는 정렬 기준과 무관하게 항상 OPS(추정) 기준으로 매겨서, 이름순 정렬을 택해도
+# '종합순위'는 정렬 기준과 무관하게 항상 OPS 기준으로 매겨서, 다른 기준으로 정렬해도
 # 성적 순위를 함께 참고할 수 있도록 함.
 table_df["종합순위"] = table_df["hit_OPS_est"].rank(ascending=False, method="min").astype("Int64")
 
@@ -81,7 +91,7 @@ else:
 display_cols = [
     "종합순위", "player_name", "team", "def_POS", "hit_PA", "hit_AB", "hit_H",
     "hit_2B", "hit_3B", "hit_HR", "hit_RBI", "hit_AVG",
-    "hit_OBP_est", "hit_SLG", "hit_OPS_est", "hit_wOBA_est",
+    "hit_OBP_est", "hit_SLG", "hit_OPS_est", "hit_RISP", "hit_PH_BA",
 ]
 display_cols = [c for c in display_cols if c in table_df.columns]
 
@@ -95,90 +105,156 @@ st.dataframe(
         "team": st.column_config.TextColumn("구단"),
         "def_POS": st.column_config.TextColumn("포지션"),
         "hit_AVG": st.column_config.NumberColumn("타율", format="%.3f"),
-        "hit_OBP_est": st.column_config.NumberColumn("출루율(추정)", format="%.3f"),
+        "hit_OBP_est": st.column_config.NumberColumn("출루율", format="%.3f"),
         "hit_SLG": st.column_config.NumberColumn("장타율", format="%.3f"),
-        "hit_OPS_est": st.column_config.NumberColumn("OPS(추정)", format="%.3f"),
-        "hit_wOBA_est": st.column_config.NumberColumn("wOBA(추정)", format="%.3f"),
+        "hit_OPS_est": st.column_config.NumberColumn("OPS", format="%.3f"),
+        "hit_RISP": st.column_config.NumberColumn("득점권타율", format="%.3f"),
+        "hit_PH_BA": st.column_config.NumberColumn("대타타율", format="%.3f"),
     },
 )
 st.caption(
-    "⚠️ 이 데이터셋에는 타자 볼넷(BB)·사구(HBP) 컬럼이 없어, "
-    "PA - AB - SF - SAC 로 역산한 근사치를 사용해 출루율/OPS/wOBA를 추정했습니다. "
-    "실제 공식 기록과 다소 차이가 날 수 있습니다."
+    "ℹ️ 2002년 이후 시즌은 실제 제공된 출루율/장타율/OPS를 사용합니다. "
+    "2001년 시즌은 실제 볼넷·사구 기록으로 직접 계산했고, wOBA는 표준 선형가중치 근사치입니다."
 )
 
 st.divider()
 
 # ---------------------------------------------------------------
-# 세이버메트릭스 랭킹 바차트 (wOBA 상위 15명, OPS는 막대 끝 라벨로 함께 표기)
-# 기존 버블차트는 점이 겹쳐 가독성이 떨어져 랭킹 바차트로 교체.
+# 1. 세이버메트릭스 히트맵 (Top 15, 여러 지표를 한 번에 비교)
+#    기존 버블차트는 점이 겹쳐 가독성이 떨어져, 지표별 상대순위를 색으로 보여주는
+#    히트맵으로 교체 (실제 수치는 칸 안에 텍스트로 표기 → 한눈에 비교 가능).
 # ---------------------------------------------------------------
-st.subheader("💠 세이버메트릭스 랭킹 (wOBA 상위 15명)")
+st.subheader("💠 세이버메트릭스 히트맵 (OPS 상위 15명)")
 
-top_woba = batters.dropna(subset=["hit_wOBA_est", "hit_OPS_est"]).sort_values("hit_wOBA_est", ascending=False).head(15)
+metric_cols = ["hit_AVG", "hit_OBP_est", "hit_SLG", "hit_OPS_est", "hit_RISP"]
+metric_labels = ["타율", "출루율", "장타율", "OPS", "득점권타율"]
 
-if not top_woba.empty:
-    top_woba_sorted = top_woba.sort_values("hit_wOBA_est")  # 가로 막대는 아래->위로 그려지므로 오름차순 정렬
-    fig_bar = go.Figure()
-    fig_bar.add_trace(go.Bar(
-        x=top_woba_sorted["hit_wOBA_est"],
-        y=top_woba_sorted["player_name"],
-        orientation="h",
-        marker_color=COLOR_SEQUENCE[0],
-        text=[f"wOBA {w:.3f} · OPS {o:.3f}" for w, o in zip(top_woba_sorted["hit_wOBA_est"], top_woba_sorted["hit_OPS_est"])],
-        textposition="outside",
-        name="wOBA(추정)",
+heat_src = batters.dropna(subset=["hit_OPS_est"]).sort_values("hit_OPS_est", ascending=False).head(15)
+
+if not heat_src.empty:
+    z_raw = heat_src[metric_cols].to_numpy(dtype=float)
+    # 결측치는 해당 지표 평균으로 채워 색상 계산에서 제외되지 않게 함 (텍스트는 원본 결측 그대로 표기)
+    col_means = np.nanmean(z_raw, axis=0)
+    z_filled = np.where(np.isnan(z_raw), col_means, z_raw)
+    col_min = z_filled.min(axis=0)
+    col_max = z_filled.max(axis=0)
+    z_norm = (z_filled - col_min) / (col_max - col_min + 1e-9)
+
+    text_matrix = np.array([[f"{v:.3f}" if not np.isnan(v) else "-" for v in row] for row in z_raw])
+
+    fig_heat = go.Figure(go.Heatmap(
+        z=z_norm.T,
+        x=heat_src["player_name"],
+        y=metric_labels,
+        text=text_matrix.T,
+        texttemplate="%{text}",
+        textfont=dict(color="#111827", size=12),
+        colorscale="RdYlGn",
+        showscale=False,
+        xgap=3, ygap=3,
     ))
-    fig_bar.update_xaxes(title="wOBA(추정)")
-    fig_bar.update_layout(margin=dict(r=160))  # 막대 끝 텍스트 라벨 공간 확보
-    apply_common_layout(fig_bar, height=520)
-    st.plotly_chart(fig_bar, use_container_width=True)
-    st.caption("막대 끝 라벨에 wOBA(추정)와 OPS(추정)를 함께 표기했습니다.")
+    fig_heat.update_xaxes(tickangle=-40)
+    apply_common_layout(fig_heat, title="선수(열) × 지표(행) — 초록에 가까울수록 해당 지표 상위권", height=380)
+    st.plotly_chart(fig_heat, use_container_width=True)
 else:
     st.info("표시할 데이터가 부족합니다.")
 
 st.divider()
 
 # ---------------------------------------------------------------
-# 주루 4분면 분석 (도루 시도 vs 성공률, 색상=주루사)
+# 2. 클러치 히팅 랭킹 (득점권 타율 - 전체 타율, 다이버징 바 차트)
 # ---------------------------------------------------------------
-st.subheader("🏃 주루 4분면 분석 (도루시도 vs 성공률)")
+st.subheader("🔥 클러치 히팅 랭킹 (득점권타율 − 전체타율)")
 
-run_df = season_df.dropna(subset=["run_SBA", "run_SB_pct"])
-run_df = run_df[run_df["run_SBA"] > 0]
+clutch_df = batters.dropna(subset=["hit_RISP", "hit_AVG"]).copy()
+clutch_df["clutch_diff"] = clutch_df["hit_RISP"] - clutch_df["hit_AVG"]
+
+if not clutch_df.empty:
+    top_pos = clutch_df.sort_values("clutch_diff", ascending=False).head(8)
+    top_neg = clutch_df.sort_values("clutch_diff", ascending=True).head(8)
+    combo = pd.concat([top_neg, top_pos]).drop_duplicates(subset=["player_name"]).sort_values("clutch_diff")
+
+    colors = ["#EF4444" if v < 0 else "#10B981" for v in combo["clutch_diff"]]
+    fig_clutch = go.Figure(go.Bar(
+        x=combo["clutch_diff"],
+        y=combo["player_name"],
+        orientation="h",
+        marker_color=colors,
+        text=[f"{v:+.3f}" for v in combo["clutch_diff"]],
+        textposition="outside",
+    ))
+    fig_clutch.add_vline(x=0, line_color="#94A3B8")
+    fig_clutch.update_xaxes(title="득점권타율 − 전체타율")
+    apply_common_layout(fig_clutch, height=480)
+    st.plotly_chart(fig_clutch, use_container_width=True)
+    st.caption("초록(+)은 득점권에서 평소보다 더 잘 치는 '클러치' 유형, 빨강(-)은 득점권에서 오히려 약해지는 유형입니다.")
+else:
+    st.info("득점권 타율 데이터가 부족합니다. (2002년 이후 시즌에서 제공)")
+
+st.divider()
+
+# ---------------------------------------------------------------
+# 3. 대타 스페셜리스트 랭킹 (대타 타율 Top 10)
+# ---------------------------------------------------------------
+st.subheader("🎭 대타 스페셜리스트 랭킹 (대타 타율 Top 10)")
+
+ph_df = season_df.dropna(subset=["hit_PH_BA"]).sort_values("hit_PH_BA", ascending=False).head(10)
+if not ph_df.empty:
+    ph_sorted = ph_df.sort_values("hit_PH_BA")
+    fig_ph = go.Figure(go.Bar(
+        x=ph_sorted["hit_PH_BA"],
+        y=ph_sorted["player_name"],
+        orientation="h",
+        marker_color=COLOR_SEQUENCE[4],
+        text=[f"{v:.3f}" for v in ph_sorted["hit_PH_BA"]],
+        textposition="outside",
+    ))
+    fig_ph.update_xaxes(title="대타 타율")
+    apply_common_layout(fig_ph, height=420)
+    st.plotly_chart(fig_ph, use_container_width=True)
+    st.caption("⚠️ 대타 타석 수 자체가 적은 선수가 많아 표본이 작을 수 있습니다 (참고용 지표).")
+else:
+    st.info("대타 타율 데이터가 부족합니다.")
+
+st.divider()
+
+# ---------------------------------------------------------------
+# 4. 도루 성공/실패 스택 바 차트 (Top 12 도루 시도자)
+#    기존 4분면 산점도 대신, 성공(SB)과 실패(CS)를 쌓아 올린 막대로 표현해
+#    누가 얼마나 많이 뛰었고 그 중 몇 번 성공/실패했는지 한눈에 보이게 함.
+# ---------------------------------------------------------------
+st.subheader("🏃 도루 시도 Top 12 (성공/실패 스택 바 차트)")
+
+run_df = season_df.dropna(subset=["run_SBA"])
+run_df = run_df[run_df["run_SBA"] > 0].sort_values("run_SBA", ascending=False).head(12)
 
 if not run_df.empty:
-    sba_mid = run_df["run_SBA"].median()
-    pct_mid = run_df["run_SB_pct"].median()
-
-    fig_quad = px.scatter(
-        run_df,
-        x="run_SBA",
-        y="run_SB_pct",
-        color="run_OOB",
-        color_continuous_scale="RdYlGn_r",
-        size="run_SBA",
-        size_max=30,
-        hover_name="player_name",
-        hover_data={"team": True, "run_SB": True, "run_CS": True, "run_OOB": True},
-        labels={"run_SBA": "도루 시도", "run_SB_pct": "도루 성공률(%)", "run_OOB": "주루사"},
-    )
-    fig_quad.add_vline(x=sba_mid, line_dash="dash", line_color="#94A3B8")
-    fig_quad.add_hline(y=pct_mid, line_dash="dash", line_color="#94A3B8")
-    apply_common_layout(fig_quad, height=520)
-    st.plotly_chart(fig_quad, use_container_width=True)
-    st.caption("점선은 중앙값 기준선이며, 4개 사분면으로 '고빈도-고성공', '고빈도-저성공' 등 유형을 구분할 수 있습니다. 색상이 진할수록 주루사(run_OOB)가 많음을 의미합니다.")
+    run_sorted = run_df.sort_values("run_SBA")
+    fig_run = go.Figure()
+    fig_run.add_trace(go.Bar(
+        x=run_sorted["run_SB"], y=run_sorted["player_name"], orientation="h",
+        name="도루 성공(SB)", marker_color="#10B981",
+    ))
+    fig_run.add_trace(go.Bar(
+        x=run_sorted["run_CS"], y=run_sorted["player_name"], orientation="h",
+        name="도루 실패(CS)", marker_color="#EF4444",
+    ))
+    fig_run.update_layout(barmode="stack")
+    fig_run.update_xaxes(title="도루 시도 횟수 (성공+실패)")
+    apply_common_layout(fig_run, height=480)
+    st.plotly_chart(fig_run, use_container_width=True)
+    st.caption("막대 전체 길이가 도루 시도 횟수이며, 초록(성공)과 빨강(실패)의 비율로 도루 성공률을 한눈에 볼 수 있습니다.")
 else:
     st.info("도루 시도 데이터가 부족합니다.")
 
 st.divider()
 
 # ---------------------------------------------------------------
-# 포지션별 수비율 분포 (Box Plot)
-# 기존 Violin Plot은 겹치는 밀도 곡선 때문에 가독성이 떨어져 Box Plot으로 교체.
-# 포지션별 세분화가 필요하므로 포지션 단위 원본(load_position_level_data)을 사용.
+# 5. 포지션별 평균 수비율 랭킹 (가로 막대)
+#    기존 Box/Violin Plot 대신 포지션별 평균값을 단순 막대로 비교.
+#    포지션별 세분화가 필요하므로 포지션 단위 원본(load_position_level_data)을 사용.
 # ---------------------------------------------------------------
-st.subheader("🧤 포지션별 수비율(FPCT) 분포")
+st.subheader("🧤 포지션별 평균 수비율(FPCT) 랭킹")
 
 position_df = load_position_level_data()
 def_season_df = position_df[position_df["year"] == selected_year]
@@ -186,20 +262,17 @@ def_df = def_season_df.dropna(subset=["def_FPCT", "def_POS"])
 def_df = def_df[(def_df["def_POS"] != "") & (def_df["def_POS"] != "투수")]
 
 if not def_df.empty:
-    # 중앙값이 높은 포지션 순으로 정렬해 비교가 쉽도록 함
-    order = def_df.groupby("def_POS")["def_FPCT"].median().sort_values(ascending=False).index.tolist()
-    fig_box = px.box(
-        def_df,
-        x="def_POS",
-        y="def_FPCT",
-        color="def_POS",
-        category_orders={"def_POS": order},
-        points="outliers",
-        labels={"def_POS": "포지션", "def_FPCT": "수비율"},
-        color_discrete_sequence=COLOR_SEQUENCE,
-    )
-    fig_box.update_layout(showlegend=False)
-    apply_common_layout(fig_box, height=480)
-    st.plotly_chart(fig_box, use_container_width=True)
+    pos_avg = def_df.groupby("def_POS")["def_FPCT"].mean().sort_values()
+    fig_pos = go.Figure(go.Bar(
+        x=pos_avg.values,
+        y=pos_avg.index,
+        orientation="h",
+        marker_color=COLOR_SEQUENCE[2],
+        text=[f"{v:.3f}" for v in pos_avg.values],
+        textposition="outside",
+    ))
+    fig_pos.update_xaxes(title="평균 수비율(FPCT)", range=[pos_avg.min() * 0.97, 1.01])
+    apply_common_layout(fig_pos, height=420)
+    st.plotly_chart(fig_pos, use_container_width=True)
 else:
     st.info("수비율 데이터가 부족합니다.")
