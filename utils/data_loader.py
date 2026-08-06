@@ -28,7 +28,7 @@ import pandas as pd
 import numpy as np
 import streamlit as st
 
-DATA_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "KBO.dta")
+DATA_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "KBO_1.dta")
 
 # 포지션 표기 순서 (야구 등번호 순서: 투수-포수-내야-외야)
 POSITION_ORDER = ["투수", "포수", "1루수", "2루수", "3루수", "유격수", "좌익수", "중견수", "우익수"]
@@ -164,7 +164,63 @@ def load_position_level_data():
     한 선수가 시즌 중 여러 포지션을 뛰었으면 여러 행으로 남아있다.
     포지션별 수비 기록(FPCT 등) 분석처럼 포지션 단위 구분이 꼭 필요한 경우에만 사용.
     """
-    df = pd.read_stata(DATA_PATH)
+    if not os.path.exists(DATA_PATH):
+        # 배포 환경(Streamlit Cloud 등)에서 data/KBO.dta가 리포지토리에 커밋되지 않았거나
+        # 경로가 어긋난 경우 원인 파악이 쉽도록 상세 정보를 함께 보여준다.
+        repo_root = os.path.dirname(os.path.dirname(__file__))
+        try:
+            root_listing = os.listdir(repo_root)
+        except Exception:
+            root_listing = ["(리포지토리 루트를 읽을 수 없음)"]
+        data_dir = os.path.join(repo_root, "data")
+        try:
+            data_listing = os.listdir(data_dir) if os.path.isdir(data_dir) else ["(data 폴더 자체가 없음)"]
+        except Exception:
+            data_listing = ["(data 폴더를 읽을 수 없음)"]
+
+        st.error(
+            "❌ 데이터 파일을 찾을 수 없습니다.\n\n"
+            f"찾으려던 경로: `{DATA_PATH}`\n\n"
+            f"리포지토리 루트({repo_root})의 파일 목록:\n{root_listing}\n\n"
+            f"data 폴더 내용:\n{data_listing}\n\n"
+            "**확인해보세요:**\n"
+            "1. GitHub 리포지토리에 `data/KBO.dta` 파일이 실제로 커밋/푸시되었는지 "
+            "(GitHub 웹사이트에서 리포지토리를 열어 `data` 폴더와 그 안의 `KBO.dta`가 보이는지 확인)\n"
+            "2. `.gitignore`에 `data/`나 `*.dta`가 포함되어 있어 파일이 제외되지는 않았는지\n"
+            "3. GitHub 웹 UI로 파일을 업로드했다면, 폴더째 드래그했을 때 하위 폴더 구조가 "
+            "깨지지 않았는지 (data/KBO.dta가 아니라 리포지토리 루트에 KBO.dta로 올라간 경우가 흔합니다)"
+        )
+        st.stop()
+
+    file_size = os.path.getsize(DATA_PATH)
+    with open(DATA_PATH, "rb") as f:
+        header_preview = f.read(200)
+
+    try:
+        df = pd.read_stata(DATA_PATH)
+    except Exception as read_err:
+        # 흔한 원인: Git LFS로 추적되는 파일인데 배포 환경이 LFS를 지원하지 않아
+        # 실제 데이터 대신 'LFS 포인터'라는 작은 텍스트 파일만 받아온 경우.
+        # (Streamlit Community Cloud는 기본적으로 Git LFS를 지원하지 않습니다.)
+        is_lfs_pointer = header_preview.startswith(b"version https://git-lfs")
+        st.error(
+            "❌ data/KBO.dta 파일을 찾긴 했지만, Stata 파일로 읽는 데 실패했습니다.\n\n"
+            f"파일 크기: {file_size:,} bytes (정상 파일은 약 5,656,011 bytes)\n"
+            f"파일 앞부분 미리보기: `{header_preview[:120]!r}`\n\n"
+            + (
+                "**원인 추정: Git LFS 포인터 파일입니다.** "
+                "이 파일이 실제 데이터가 아니라 Git LFS 포인터(안내용 텍스트)로 저장되어 있습니다. "
+                "Streamlit Community Cloud는 Git LFS를 지원하지 않아 포인터 파일만 받아오면 이런 에러가 납니다.\n"
+                "해결: 리포지토리에서 `.gitattributes`에 `*.dta filter=lfs ...` 같은 줄이 있다면 삭제하고, "
+                "`git lfs untrack \"*.dta\"` 후 파일을 일반 파일로 다시 커밋해주세요."
+                if is_lfs_pointer else
+                "**원인 추정: 파일이 손상되었거나 올바른 .dta 파일이 아닙니다.** "
+                "업로드 과정에서 파일이 손상되었을 수 있습니다 (예: 텍스트 모드로 변환되어 저장, 잘못된 파일을 같은 이름으로 업로드 등). "
+                "로컬에서 파일을 다시 다운로드해 `data/KBO.dta` 자리에 원본 그대로 다시 올려주세요."
+            )
+            + f"\n\n(원본 에러: {read_err})"
+        )
+        st.stop()
 
     for col in SIMPLE_NUMERIC_STRING_COLS:
         if col in df.columns:
