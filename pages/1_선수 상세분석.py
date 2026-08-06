@@ -22,11 +22,13 @@ df = load_data()
 st.title("🔍 선수 상세 분석")
 
 # ---------------------------------------------------------------
-# 선수 선택: 구단 -> 포지션 -> 선수 (+ 이름 검색은 별도 유지)
+# 선수 선택: 구단 -> 포지션 -> 선수 (①②③), 이름 검색은 번호 없이 별도의 빠른 검색란으로 분리
 # ---------------------------------------------------------------
 st.subheader("선수 선택")
 
-col_team, col_pos, col_search = st.columns([1, 1, 1.4])
+search_term = st.text_input("🔎 이름으로 빠르게 찾기 (선택)", placeholder="예: 이정후, 김광현 ...")
+
+col_team, col_pos, col_player = st.columns([1, 1, 1.4])
 
 with col_team:
     team_sel = st.selectbox("① 구단 선택", options=["전체"] + get_teams(df))
@@ -41,18 +43,16 @@ if pos_sel != "전체":
     # def_POS는 '좌익수/우익수'처럼 겸한 포지션이 '/'로 이어져 있으므로 포함 여부로 필터링
     pool = pool[pool["def_POS"].str.contains(pos_sel, na=False)]
 
-with col_search:
-    search_term = st.text_input("③ 이름 검색 (선택)", placeholder="예: 이정후, 김광현 ...")
-
 candidate_names = sorted(pool["player_name"].dropna().unique().tolist())
 if search_term:
     candidate_names = [p for p in candidate_names if search_term.strip() in p]
 
-if not candidate_names:
-    st.warning("조건에 맞는 선수가 없습니다. 구단/포지션/검색어를 다시 확인해주세요.")
-    st.stop()
-
-selected_player = st.selectbox("④ 선수 선택", options=candidate_names)
+with col_player:
+    if not candidate_names:
+        st.selectbox("③ 선수 선택", options=["(해당 없음)"], disabled=True)
+        st.warning("조건에 맞는 선수가 없습니다. 구단/포지션/검색어를 다시 확인해주세요.")
+        st.stop()
+    selected_player = st.selectbox("③ 선수 선택", options=candidate_names)
 
 # 페이지의 나머지 분석은 '해당 선수의 전체 통산 기록'을 기준으로 함 (구단/포지션 선택은 선수를 찾기 위한 필터일 뿐)
 player_df = df[df["player_name"] == selected_player].sort_values("year")
