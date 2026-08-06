@@ -6,10 +6,11 @@ KBO 기록 분석 대시보드 - 메인 홈
 """
 
 import streamlit as st
-import plotly.express as px
+import plotly.graph_objects as go
 
 from utils.data_loader import load_data, get_years
 from utils.style import apply_common_layout, COLOR_SEQUENCE
+from utils.glossary import render_glossary
 
 st.set_page_config(
     page_title="KBO 기록 분석 대시보드",
@@ -53,13 +54,19 @@ season_df = df[df["year"] == selected_year].copy()
 st.title("⚾ KBO 기록 분석 대시보드")
 st.caption(f"{selected_year} 시즌 리그 전체 개요")
 
+# ERA(평균자책점), WHIP 등 약어가 낯설 수 있으므로 화면에도 설명을 노출
+render_glossary(["hit_AVG", "hit_HR", "pit_ERA", "pit_WHIP"])
+
 # ---------------------------------------------------------------
 # KPI 메트릭 카드
 # ---------------------------------------------------------------
 total_players = season_df["player_name"].nunique()
 
+# hit_AVG(타율) = 안타/타수, hit_HR(홈런) = 시즌 홈런 개수
 best_avg_row = season_df.loc[season_df["hit_AVG"].idxmax()] if season_df["hit_AVG"].notna().any() else None
 most_hr_row = season_df.loc[season_df["hit_HR"].idxmax()] if season_df["hit_HR"].notna().any() else None
+# pit_ERA(평균자책점, Earned Run Average) = 9이닝당 자책점. 낮을수록 우수.
+# 이닝이 너무 적은 투수가 우연히 낮은 ERA로 뽑히는 것을 막기 위해 30이닝 이상만 집계.
 best_era_series = season_df[season_df["pit_IP"] >= 30]["pit_ERA"] if "pit_IP" in season_df.columns else season_df["pit_ERA"]
 best_era_row = None
 if best_era_series is not None and best_era_series.notna().any():
@@ -120,44 +127,48 @@ batters = season_df[season_df["hit_PA"] >= pa_threshold].dropna(subset=["hit_AVG
 pitchers = season_df[season_df["pit_IP"] >= ip_threshold].dropna(subset=["pit_ERA", "pit_WHIP"])
 
 # ---------------------------------------------------------------
-# 산점도: 타율 vs 홈런 / ERA vs WHIP
+# 리더보드: 타율 Top 10 / ERA Top 10 (막대그래프)
+# 기존에는 산점도(타율 vs 홈런, ERA vs WHIP)로 관계를 보여줬으나,
+# 점이 많으면 한눈에 들어오지 않는다는 피드백에 따라 순위가 명확히 보이는
+# 가로 막대 리더보드로 교체. 보조 지표(홈런/WHIP)는 막대 끝 텍스트로 함께 표기.
 # ---------------------------------------------------------------
 c1, c2 = st.columns(2)
 
 with c1:
-    st.subheader("타율 vs 홈런")
+    st.subheader("🏏 타율 Top 10 (규정 타석 기준)")
     if not batters.empty:
-        fig1 = px.scatter(
-            batters,
-            x="hit_AVG",
-            y="hit_HR",
-            color="team",
-            size="hit_PA",
-            hover_name="player_name",
-            hover_data={"hit_AVG": ":.3f", "hit_HR": True, "hit_PA": True, "team": True},
-            labels={"hit_AVG": "타율", "hit_HR": "홈런", "team": "구단"},
-            color_discrete_sequence=COLOR_SEQUENCE,
-        )
+        top_avg = batters.sort_values("hit_AVG", ascending=False).head(10).sort_values("hit_AVG")
+        fig1 = go.Figure(go.Bar(
+            x=top_avg["hit_AVG"],
+            y=top_avg["player_name"],
+            orientation="h",
+            marker_color=COLOR_SEQUENCE[0],
+            text=[f"{avg:.3f} · HR {int(hr)}" for avg, hr in zip(top_avg["hit_AVG"], top_avg["hit_HR"])],
+            textposition="outside",
+        ))
+        fig1.update_xaxes(title="타율")
+        fig1.update_layout(margin=dict(r=140))
         apply_common_layout(fig1, height=460)
         st.plotly_chart(fig1, use_container_width=True)
     else:
         st.info("조건을 만족하는 타자 데이터가 없습니다.")
 
 with c2:
-    st.subheader("ERA vs WHIP")
+    st.subheader("🎯 ERA Top 10 (규정 이닝 기준)")
+    # pit_WHIP (Walks+Hits per Inning Pitched) = 이닝당 허용 안타+볼넷. 낮을수록 좋음.
+    # ERA는 낮을수록 우수하므로 오름차순 정렬 후 상위 10명을 뽑는다.
     if not pitchers.empty:
-        fig2 = px.scatter(
-            pitchers,
-            x="pit_WHIP",
-            y="pit_ERA",
-            color="team",
-            size="pit_IP",
-            hover_name="player_name",
-            hover_data={"pit_ERA": ":.2f", "pit_WHIP": ":.2f", "pit_IP": ":.1f", "team": True},
-            labels={"pit_WHIP": "WHIP", "pit_ERA": "ERA", "team": "구단"},
-            color_discrete_sequence=COLOR_SEQUENCE,
-        )
-        fig2.update_yaxes(autorange="reversed")  # ERA 낮을수록 우수 -> 상단 배치
+        top_era = pitchers.sort_values("pit_ERA", ascending=True).head(10).sort_values("pit_ERA", ascending=False)
+        fig2 = go.Figure(go.Bar(
+            x=top_era["pit_ERA"],
+            y=top_era["player_name"],
+            orientation="h",
+            marker_color=COLOR_SEQUENCE[3],
+            text=[f"{era:.2f} · WHIP {whip:.2f}" for era, whip in zip(top_era["pit_ERA"], top_era["pit_WHIP"])],
+            textposition="outside",
+        ))
+        fig2.update_xaxes(title="ERA")
+        fig2.update_layout(margin=dict(r=140))
         apply_common_layout(fig2, height=460)
         st.plotly_chart(fig2, use_container_width=True)
     else:
