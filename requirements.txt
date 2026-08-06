@@ -1,4 +1,0 @@
-streamlit
-starlette<1.4
-pyreadstat
-plotly
