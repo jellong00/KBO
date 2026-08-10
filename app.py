@@ -58,7 +58,17 @@ with col_left:
 `hit_*`/`pit_*` 컬럼이 동시에 값을 가질 수 있습니다. "이 선수가 투수인가 타자인가"는
 `primary_position` 컬럼(그 시즌 가장 많이 뛴 포지션) 기준으로 판단하시면 됩니다.
     """)
-    
+
+with col_right:
+    st.markdown("**⚙️ 원본 데이터 정제 내역** (수업 참고용)")
+    st.info(
+        "- 원본은 한 선수가 여러 포지션을 겸하면 포지션별로 행이 나뉘어 있었음 → "
+        "선수-시즌 1행으로 병합\n"
+        "- 이닝 표기(예: `41 1/3`), 빈 문자열 결측치 등 문자열로 섞여있던 숫자 컬럼 정리\n"
+        "- 구단 명칭 변경 이력 반영 (SK→SSG, 우리/히어로즈/넥센→키움 등)\n\n"
+        "**데이터 정제 자체가 훌륭한 '데이터 전처리' 교육 사례입니다.**"
+    )
+
 st.divider()
 
 # ---------------------------------------------------------------
@@ -84,7 +94,7 @@ for i, row in team_span.iterrows():
 fig_span.update_xaxes(title="연도", dtick=2)
 fig_span.update_yaxes(title="")
 apply_common_layout(fig_span, height=420)
-st.plotly_chart(fig_span, use_container_width=True)
+st.plotly_chart(fig_span, use_container_width=True, theme=None)
 
 st.divider()
 
@@ -102,7 +112,7 @@ fig_count = go.Figure(go.Bar(
 fig_count.update_xaxes(title="연도", dtick=2)
 fig_count.update_yaxes(title="등록 선수 수(명)")
 apply_common_layout(fig_count, height=380)
-st.plotly_chart(fig_count, use_container_width=True)
+st.plotly_chart(fig_count, use_container_width=True, theme=None)
 
 st.divider()
 st.markdown("### 👈 왼쪽 사이드바에서 다른 페이지로 이동해서 더 자세한 분석을 확인해보세요.")
