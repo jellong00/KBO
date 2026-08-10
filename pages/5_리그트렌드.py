@@ -46,40 +46,15 @@ fig_trend.update_layout(
     xaxis=dict(title="연도", dtick=2),
 )
 apply_common_layout(fig_trend, title="리그 평균 타율 vs 평균 ERA 추이", height=460)
-st.plotly_chart(fig_trend, use_container_width=True)
+st.plotly_chart(fig_trend, use_container_width=True, theme=None)
 st.caption("타율과 ERA가 함께 오르면 '타고투저' 시기, 함께 내리면 '투고타저' 시기로 해석할 수 있습니다.")
 
 st.divider()
 
 # ---------------------------------------------------------------
-# 2. 연도별 구단 타율-홈런 변화 애니메이션 버블차트
+# 2. 구단 x 연도 평균 ERA 히트맵
 # ---------------------------------------------------------------
-st.subheader("2️⃣ 연도별 구단 타율-홈런 변화 (재생 버튼을 눌러보세요 ▶️)")
-
-team_year = (
-    df.dropna(subset=["hit_AVG"]).groupby(["year", "team"])
-    .agg(팀평균타율=("hit_AVG", "mean"), 팀총홈런=("hit_HR", "sum"), 등록선수수=("player_name", "nunique"))
-    .reset_index()
-)
-
-fig_anim = px.scatter(
-    team_year, x="팀평균타율", y="팀총홈런", animation_frame="year", animation_group="team",
-    color="team", size="등록선수수", hover_name="team",
-    range_x=[team_year["팀평균타율"].min() * 0.95, team_year["팀평균타율"].max() * 1.05],
-    range_y=[0, team_year["팀총홈런"].max() * 1.1],
-    labels={"팀평균타율": "팀 평균 타율", "팀총홈런": "팀 총 홈런"},
-    color_discrete_sequence=COLOR_SEQUENCE,
-)
-apply_common_layout(fig_anim, height=560)
-st.plotly_chart(fig_anim, use_container_width=True)
-st.caption("연도 슬라이더 또는 ▶️ 재생 버튼으로 구단들의 타격 스타일이 시즌마다 어떻게 이동하는지 확인할 수 있습니다.")
-
-st.divider()
-
-# ---------------------------------------------------------------
-# 3. 구단 x 연도 평균 ERA 히트맵
-# ---------------------------------------------------------------
-st.subheader("3️⃣ 구단별 투수력 변화 히트맵 (평균 ERA)")
+st.subheader("2️⃣ 구단별 투수력 변화 히트맵 (평균 ERA)")
 
 pitcher_df = df[df["primary_position"] == "투수"].dropna(subset=["pit_ERA"])
 heat = pitcher_df.groupby(["team", "year"])["pit_ERA"].mean().reset_index()
@@ -91,7 +66,7 @@ fig_heat = px.imshow(
 )
 apply_common_layout(fig_heat, height=520)
 fig_heat.update_xaxes(dtick=2)
-st.plotly_chart(fig_heat, use_container_width=True)
+st.plotly_chart(fig_heat, use_container_width=True, theme=None)
 st.caption("초록색일수록 그 해 ERA가 낮아(우수) 투수력이 좋았던 시즌입니다. 빈 칸은 그 연도에 해당 구단이 없었음을 의미합니다.")
 
 st.divider()
@@ -99,7 +74,7 @@ st.divider()
 # ---------------------------------------------------------------
 # 4. 역대 리더보드
 # ---------------------------------------------------------------
-st.subheader("4️⃣ 역대 한 시즌 최고 기록 리더보드")
+st.subheader("3️⃣ 역대 한 시즌 최고 기록 리더보드")
 
 lb1, lb2 = st.columns(2)
 
@@ -113,7 +88,7 @@ with lb1:
     ))
     fig_hr_lb.update_xaxes(title="홈런")
     apply_common_layout(fig_hr_lb, height=430)
-    st.plotly_chart(fig_hr_lb, use_container_width=True)
+    st.plotly_chart(fig_hr_lb, use_container_width=True, theme=None)
 
 with lb2:
     st.markdown("**🎯 역대 한 시즌 최저 ERA Top 10 (100이닝 이상)**")
@@ -125,4 +100,4 @@ with lb2:
     ))
     fig_era_lb.update_xaxes(title="ERA")
     apply_common_layout(fig_era_lb, height=430)
-    st.plotly_chart(fig_era_lb, use_container_width=True)
+    st.plotly_chart(fig_era_lb, use_container_width=True, theme=None)
