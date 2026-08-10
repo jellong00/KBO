@@ -1,13 +1,12 @@
 """
 pages/3_랭킹.py
 ------------------
-🏆 랭킹: 타자 탭 / 투수 탭 
+🏆 랭킹: 타자 탭 / 투수 탭 (간소화 버전)
 - 규정 타석/이닝 필터, 순위 테이블
 - 타자: 세이버메트릭스 히트맵 1개만
 - 투수: K9 vs 피안타/피홈런 혼합차트 1개만
 """
 
-import numpy as np
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
@@ -83,28 +82,35 @@ with tab_batter:
     )
 
     st.divider()
-    st.subheader("💠 세이버메트릭스 히트맵 (OPS 상위 15명)")
+    st.subheader("🏅 OPS 상위 10명의 지표별 순위 비교 (범프 차트)")
+    st.caption("각 선수가 AVG·OBP·SLG·HR·OPS에서 몇 위인지 한 번에 비교합니다. 선이 위로 갈수록(1위에 가까울수록) 그 지표에서 강점을 보인다는 뜻입니다.")
 
-    metric_cols = ["hit_AVG", "hit_OBP", "hit_SLG", "hit_OPS", "hit_RISP"]
-    metric_labels = ["타율", "출루율", "장타율", "OPS", "득점권타율"]
-    heat_src = batters.dropna(subset=["hit_OPS"]).sort_values("hit_OPS", ascending=False).head(15)
+    bump_metrics = [("AVG", "hit_AVG"), ("OBP", "hit_OBP"), ("SLG", "hit_SLG"), ("HR", "hit_HR"), ("OPS", "hit_OPS")]
 
-    if not heat_src.empty:
-        z_raw = heat_src[metric_cols].to_numpy(dtype=float)
-        col_means = np.nanmean(z_raw, axis=0)
-        z_filled = np.where(np.isnan(z_raw), col_means, z_raw)
-        col_min, col_max = z_filled.min(axis=0), z_filled.max(axis=0)
-        z_norm = (z_filled - col_min) / (col_max - col_min + 1e-9)
-        text_matrix = np.array([[f"{v:.3f}" if not np.isnan(v) else "-" for v in row] for row in z_raw])
+    rank_pool = batters.copy()
+    for label, col in bump_metrics:
+        rank_pool[f"rank_{col}"] = rank_pool[col].rank(ascending=False, method="min")
 
-        fig_heat = go.Figure(go.Heatmap(
-            z=z_norm.T, x=heat_src["player_name"], y=metric_labels,
-            text=text_matrix.T, texttemplate="%{text}", textfont=dict(color="#111827", size=12),
-            colorscale="RdYlGn", showscale=False, xgap=3, ygap=3,
-        ))
-        fig_heat.update_xaxes(tickangle=-40)
-        apply_common_layout(fig_heat, title="선수(열) × 지표(행) — 초록에 가까울수록 상위권", height=380)
-        st.plotly_chart(fig_heat, use_container_width=True, theme=None)
+    top10 = rank_pool.dropna(subset=["hit_OPS"]).sort_values("hit_OPS", ascending=False).head(10)
+
+    if not top10.empty:
+        fig_bump = go.Figure()
+        x_labels = [label for label, _ in bump_metrics]
+        for i, (_, row) in enumerate(top10.iterrows()):
+            y_vals = [row[f"rank_{col}"] for _, col in bump_metrics]
+            fig_bump.add_trace(go.Scatter(
+                x=x_labels, y=y_vals, mode="lines+markers+text",
+                name=row["player_name"],
+                line=dict(width=2.5, color=COLOR_SEQUENCE[i % len(COLOR_SEQUENCE)]),
+                marker=dict(size=9),
+                text=[row["player_name"] if x == "AVG" else "" for x in x_labels],
+                textposition="middle left",
+            ))
+        fig_bump.update_yaxes(title="순위 (1위가 위)", autorange="reversed", dtick=1)
+        fig_bump.update_xaxes(title="")
+        apply_common_layout(fig_bump, height=520)
+        st.plotly_chart(fig_bump, use_container_width=True, theme=None)
+        st.caption("💡 어떤 선수는 OPS 1위지만 다른 지표는 하위권일 수 있습니다 — 지표별 강점/약점이 다른 선수를 찾아보세요.")
     else:
         st.info("표시할 데이터가 부족합니다.")
 
