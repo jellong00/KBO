@@ -113,7 +113,7 @@ if labels_a and labels_b:
         angularaxis=dict(tickfont=dict(color="#111827", size=12)),
     ))
     apply_common_layout(fig, title=f"{player_a} vs {player_b} ({selected_year})", height=550)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, theme=None)
 else:
     st.info("두 선수 중 레이더 차트를 그릴 데이터가 부족한 선수가 있습니다.")
 
