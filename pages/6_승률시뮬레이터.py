@@ -95,7 +95,7 @@ fig_gauge = go.Figure(go.Indicator(
     },
 ))
 apply_common_layout(fig_gauge, height=380)
-st.plotly_chart(fig_gauge, use_container_width=True)
+st.plotly_chart(fig_gauge, use_container_width=True, theme=None)
 st.caption(f"조정 시나리오: 득점 {rs:.0f}→{sim_rs:.0f}점, 실점 {ra:.0f}→{sim_ra:.0f}점.")
 
 st.divider()
@@ -123,4 +123,4 @@ if not luck_df.empty:
     fig_luck.add_vline(x=0, line_color="#94A3B8")
     fig_luck.update_xaxes(title="실제승률 − 기대승률 (%p)")
     apply_common_layout(fig_luck, height=420)
-    st.plotly_chart(fig_luck, use_container_width=True)
+    st.plotly_chart(fig_luck, use_container_width=True, theme=None)
