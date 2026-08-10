@@ -122,7 +122,7 @@ if selected_metrics:
     fig.update_xaxes(title="시즌", dtick=1, row=n, col=1)
     apply_common_layout(fig, title=f"{selected_player} 시즌별 추이", height=230 * n)
     fig.update_annotations(font=dict(color="#111827", size=13))
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, theme=None)
 else:
     st.info("표시할 지표를 1개 이상 선택하세요.")
 
@@ -194,7 +194,7 @@ if labels:
         showlegend=False,
     )
     apply_common_layout(radar_fig, title=f"{selected_player} 포지션 대비 백분위 ({int(latest_season)})", height=500)
-    st.plotly_chart(radar_fig, use_container_width=True)
+    st.plotly_chart(radar_fig, use_container_width=True, theme=None)
 else:
     st.info("레이더 차트를 계산할 지표가 부족합니다.")
 
