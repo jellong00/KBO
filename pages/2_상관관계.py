@@ -58,6 +58,17 @@ def mean_ci_dotplot(rows_df, value_col, label_col, color, ascending_is_better=Fa
     st.plotly_chart(fig, use_container_width=True, theme=None)
 
 
+def to_era(y):
+    if y <= 2009:
+        return "2001–2009"
+    elif y <= 2019:
+        return "2010–2019"
+    return "2020–2025"
+
+
+era_order = ["2001–2009", "2010–2019", "2020–2025"]
+
+
 st.title("🔗 기초통계 (2/2): 상관관계와 집단 비교")
 tab_batter, tab_pitcher = st.tabs(["🏏 타자", "⚾ 투수"])
 
@@ -144,51 +155,56 @@ with tab_batter:
         st.info("선택한 연도에 해당하는 데이터가 부족합니다.")
 
     st.divider()
-    st.subheader("3️⃣ 시대별 공격력 비교 (2001–2009 / 2010–2019 / 2020–2025)")
+    st.subheader("3️⃣ 포지션별 공격력 비교 (포수 / 내야수 / 외야수)")
+    st.caption("범주형 집단(포지션)에 따라 연속형 변수(OPS)의 평균이 다른지 확인합니다 — ANOVA의 전형적인 활용 예시입니다. (지명타자는 수비 포지션이 없어 이 데이터에서는 구분되지 않습니다)")
 
-    def to_era(y):
-        if y <= 2009:
-            return "2001–2009"
-        elif y <= 2019:
-            return "2010–2019"
-        return "2020–2025"
+    def position_group(pos):
+        if pos == "포수":
+            return "포수"
+        if pos in ["1루수", "2루수", "3루수", "유격수"]:
+            return "내야수"
+        if pos in ["좌익수", "중견수", "우익수"]:
+            return "외야수"
+        return None
 
-    era_order = ["2001–2009", "2010–2019", "2020–2025"]
-    b_era_data = b_base.dropna(subset=["hit_OPS"]).copy()
-    b_era_data["시대"] = b_era_data["year"].apply(to_era)
+    pos_group_order = ["포수", "내야수", "외야수"]
+    b_pos_data = b_base.dropna(subset=["hit_OPS", "primary_position"]).copy()
+    b_pos_data["포지션군"] = b_pos_data["primary_position"].apply(position_group)
+    b_pos_data = b_pos_data.dropna(subset=["포지션군"])
 
-    b_era_rows = []
-    for e in era_order:
-        g = b_era_data[b_era_data["시대"] == e]["hit_OPS"]
+    b_pos_rows = []
+    for g_name in pos_group_order:
+        g = b_pos_data[b_pos_data["포지션군"] == g_name]["hit_OPS"]
         n = len(g)
         if n < 2:
             continue
         mean_v, sd_v = g.mean(), g.std()
         se_v = sd_v / np.sqrt(n)
         ci = stats.t.ppf(0.975, df=n - 1) * se_v
-        b_era_rows.append({"시대": e, "N": n, "평균": mean_v, "표준편차": sd_v, "ci": ci})
-    b_era_stats = pd.DataFrame(b_era_rows)
+        b_pos_rows.append({"포지션군": g_name, "N": n, "평균": mean_v, "표준편차": sd_v, "ci": ci})
+    b_pos_stats = pd.DataFrame(b_pos_rows)
     st.dataframe(
-        b_era_stats.drop(columns=["ci"]) if not b_era_stats.empty else b_era_stats,
+        b_pos_stats.drop(columns=["ci"]) if not b_pos_stats.empty else b_pos_stats,
         use_container_width=True, hide_index=True,
         column_config={
             "평균": st.column_config.NumberColumn("평균 OPS", format="%.3f"),
             "표준편차": st.column_config.NumberColumn("표준편차", format="%.3f"),
         },
     )
-    if len(b_era_stats) == 3:
-        mean_ci_dotplot(b_era_stats, "평균", "시대", COLOR_SEQUENCE[1], ascending_is_better=True)
-        groups = [b_era_data[b_era_data["시대"] == e]["hit_OPS"] for e in era_order]
+    if len(b_pos_stats) == 3:
+        mean_ci_dotplot(b_pos_stats, "평균", "포지션군", COLOR_SEQUENCE[1], ascending_is_better=True)
+        groups = [b_pos_data[b_pos_data["포지션군"] == g]["hit_OPS"] for g in pos_group_order]
         f_stat, p_val = stats.f_oneway(*groups)
         m1, m2 = st.columns(2)
         m1.metric("ANOVA F-통계량", f"{f_stat:.3f}")
         m2.metric("p-value", f"{p_val:.4f}")
         if p_val < 0.05:
-            st.success(f"📌 p={p_val:.4f} < 0.05 → 세 시대 간 평균 OPS 차이는 **통계적으로 유의**합니다.")
+            st.success(f"📌 p={p_val:.4f} < 0.05 → 포지션군에 따라 평균 OPS 차이는 **통계적으로 유의**합니다 (적어도 한 집단은 다릅니다).")
         else:
-            st.info(f"📌 p={p_val:.4f} ≥ 0.05 → 세 시대 간 평균 OPS 차이가 통계적으로 유의하다고 보기 어렵습니다.")
+            st.info(f"📌 p={p_val:.4f} ≥ 0.05 → 포지션군에 따른 평균 OPS 차이가 통계적으로 유의하다고 보기 어렵습니다.")
+        st.caption("💡 일반적으로 내야 코너(1루수·3루수)나 외야 코너는 공격력 부담이 크고, 유격수·2루수·포수는 수비 부담이 커서 공격력이 상대적으로 낮게 나오는 경향이 있습니다 — 실제로 그런 패턴이 보이나요?")
     else:
-        st.warning("일부 시대 구간의 표본이 부족해 비교를 수행할 수 없습니다.")
+        st.warning("일부 포지션군의 표본이 부족해 비교를 수행할 수 없습니다.")
 
 # =================================================================
 # ⚾ 투수 탭
