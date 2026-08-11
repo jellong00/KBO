@@ -1,10 +1,14 @@
 """
 pages/3_선수검색.py
 ---------------------
-선수 선택(구단 -> 포지션 -> 선수, 검색란 병행)
--> 커리어 핵심 요약(KPI 카드) -> 핵심 지표 큰 추이 차트 2개(+선택 추가지표)
--> 커리어 프로파일 차트(커리어 내 백분위, 여러 지표 한 화면)
--> (참고) 포지션 대비 백분위 레이더
+흐름:
+KPI 카드 -> 핵심추이①(OPS/ERA) -> 핵심추이②(HR/K9) -> 커리어 프로파일(백분위) -> 포지션 대비 레이더
+
+- 리그평균 비교집단은 primary_position 기준 (positions_played contains보다 엄밀)
+- 리그평균선은 선수의 실제 활동 시즌 범위로 제한
+- "통산평균" -> "커리어 시즌평균"으로 명칭 수정 (시즌별 비율의 단순평균이므로)
+- 차트 캡션에 방향성(↓낮을수록 우수 / ↑높을수록 우수) 명시
+- 추가지표는 멀티셀렉트 대신 단일 선택
 """
 
 import numpy as np
@@ -56,6 +60,7 @@ if player_df.empty:
     st.info("해당 선수의 기록이 없습니다.")
     st.stop()
 
+# 비교 기준 포지션: primary_position 기준 (positions_played contains보다 엄밀한 기준)
 if pos_sel != "전체":
     primary_pos = pos_sel
 else:
@@ -63,6 +68,7 @@ else:
 is_pitcher = primary_pos == "투수"
 
 st.caption(f"주 포지션(기준): **{primary_pos or '미상'}** · 기록 시즌: {int(player_df['year'].min())}~{int(player_df['year'].max())}")
+st.caption("● 시즌 기록  ·  ┄ 커리어 시즌평균  ·  ⋯ 동일 포지션 시즌평균  ·  ★ 커리어 최고 시즌")
 
 st.divider()
 
@@ -95,31 +101,42 @@ else:
 st.divider()
 
 # ---------------------------------------------------------------
-# 핵심 지표 추이 (큰 차트 2개): 본인 성적 + 통산평균선 + 리그(동일 포지션) 평균선 + 최고시즌 마커
+# 핵심 지표 추이 ①② : 실제값 + 커리어 시즌평균 + 동일 포지션 시즌평균 + 최고시즌
 # ---------------------------------------------------------------
-st.subheader("📈 핵심 지표 추이")
-st.caption("실선=본인 시즌별 성적, 점선=본인 통산평균, 회색 점선=해당 시즌 동일 포지션 리그평균, ⭐=커리어 최고 시즌")
-
 if is_pitcher:
-    primary_metrics = [("ERA (평균자책점)", "pit_ERA", False), ("탈삼진(SO)", "pit_SO", True)]
-    extra_options = {"WHIP": "pit_WHIP", "이닝(IP)": "pit_IP", "승수(W)": "pit_W"}
+    primary_metrics = [
+        ("ERA (평균자책점)", "pit_ERA", False, "↓ 낮을수록 우수"),
+        ("탈삼진율(K9)", "pit_K9", True, "↑ 높을수록 우수"),
+    ]
+    extra_options = {"WHIP": "pit_WHIP", "이닝(IP)": "pit_IP", "승수(W)": "pit_W", "탈삼진(SO)": "pit_SO"}
 else:
-    primary_metrics = [("OPS", "hit_OPS", True), ("홈런(HR)", "hit_HR", True)]
+    primary_metrics = [
+        ("OPS", "hit_OPS", True, "↑ 높을수록 우수"),
+        ("홈런(HR)", "hit_HR", True, "↑ 높을수록 우수"),
+    ]
     extra_options = {"타율(AVG)": "hit_AVG", "출루율(OBP)": "hit_OBP", "타점(RBI)": "hit_RBI"}
 
 render_glossary([m[1] for m in primary_metrics] + list(extra_options.values()) + ["pit_K9", "pit_BB9", "pit_HR9"])
 
-# 같은 포지션 동료들의 연도별 리그 평균 (참고선용)
-position_cohort = df[df["positions_played"].str.contains(primary_pos, na=False)] if primary_pos else df
+# 비교집단: primary_position 기준 (positions_played.contains보다 엄밀)
+position_cohort = df[df["primary_position"] == primary_pos] if primary_pos else df
 
-for label, col, higher_better in primary_metrics:
+chart_titles = ["📈 핵심 지표 추이 ① — 절대적인 시즌 퍼포먼스", "📈 핵심 지표 추이 ② — 파워·탈삼진 능력" if not is_pitcher else "📈 핵심 지표 추이 ② — 구위(탈삼진 능력)"]
+
+for i, (label, col, higher_better, direction_note) in enumerate(primary_metrics):
+    st.subheader(chart_titles[i] if i < len(chart_titles) else f"📈 핵심 지표 추이 {i+1}")
     sub = player_df.dropna(subset=[col])
     if sub.empty:
         st.info(f"{label} 데이터가 부족합니다.")
         continue
 
-    career_mean = sub[col].mean()
-    league_avg = position_cohort.dropna(subset=[col]).groupby("year")[col].mean()
+    season_mean = sub[col].mean()
+    y_min, y_max = int(sub["year"].min()), int(sub["year"].max())
+    league_avg = (
+        position_cohort[position_cohort["year"].between(y_min, y_max)]
+        .dropna(subset=[col])
+        .groupby("year")[col].mean()
+    )
     peak_idx = sub[col].idxmax() if higher_better else sub[col].idxmin()
     peak_row = sub.loc[peak_idx]
 
@@ -129,11 +146,11 @@ for label, col, higher_better in primary_metrics:
         line=dict(width=3, color=COLOR_SEQUENCE[0]), marker=dict(size=9),
     ))
     fig_big.add_hline(
-        y=career_mean, line_dash="dash", line_color=COLOR_SEQUENCE[1], line_width=2,
-        annotation_text=f"통산평균 {career_mean:.3f}", annotation_position="top left",
+        y=season_mean, line_dash="dash", line_color=COLOR_SEQUENCE[1], line_width=2,
+        annotation_text=f"커리어 시즌평균 {season_mean:.3f}", annotation_position="top left",
     )
     fig_big.add_trace(go.Scatter(
-        x=league_avg.index, y=league_avg.values, mode="lines", name=f"{primary_pos or '전체'} 리그평균",
+        x=league_avg.index, y=league_avg.values, mode="lines", name=f"{primary_pos or '전체'} 시즌평균",
         line=dict(color="#94A3B8", width=2, dash="dot"),
     ))
     fig_big.add_trace(go.Scatter(
@@ -142,82 +159,124 @@ for label, col, higher_better in primary_metrics:
     ))
     fig_big.update_xaxes(title="시즌", dtick=1)
     fig_big.update_yaxes(title=label)
-    apply_common_layout(fig_big, title=f"{selected_player} — {label} 추이", height=380)
+    apply_common_layout(fig_big, title=f"{selected_player} — {label} 추이 ({direction_note})", height=380)
     st.plotly_chart(fig_big, use_container_width=True, theme=None)
 
-selected_extra = st.multiselect("추가로 볼 지표 선택 (선택)", options=list(extra_options.keys()))
-for label in selected_extra:
-    col = extra_options[label]
+st.divider()
+
+# ---------------------------------------------------------------
+# 커리어 프로파일 (백분위) - 선수 자신의 커리어 시즌들 기준
+# ---------------------------------------------------------------
+st.subheader("🧭 커리어 프로파일")
+st.caption("각 시즌의 값을 '이 선수 본인의 커리어 시즌들' 안에서의 백분위(0~100)로 환산했습니다. 100에 가까울수록 그 선수 커리어 내 최고 수준의 시즌입니다. (동일 시즌·동료 비교는 아래 레이더 참고)")
+
+
+def career_percentile(series, higher_is_better=True):
+    pct = series.rank(pct=True) * 100
+    if not higher_is_better:
+        pct = 100 - pct
+    return pct
+
+
+if is_pitcher:
+    profile_axes = [("ERA↓", "pit_ERA", False), ("WHIP↓", "pit_WHIP", False), ("탈삼진율(K9)↑", "pit_K9", True)]
+else:
+    profile_axes = [("타율(AVG)↑", "hit_AVG", True), ("OPS↑", "hit_OPS", True), ("홈런(HR)↑", "hit_HR", True)]
+
+fig_profile = go.Figure()
+for i, (label, col, higher_better) in enumerate(profile_axes):
+    sub = player_df.dropna(subset=[col])
+    if sub.empty or sub[col].nunique() < 2:
+        continue
+    pct_series = career_percentile(sub[col], higher_is_better=higher_better)
+    fig_profile.add_trace(go.Scatter(
+        x=sub["year"], y=pct_series, mode="lines+markers", name=label,
+        line=dict(width=3, color=COLOR_SEQUENCE[i % len(COLOR_SEQUENCE)]), marker=dict(size=8),
+    ))
+fig_profile.update_xaxes(title="시즌", dtick=1)
+fig_profile.update_yaxes(title="커리어 내 백분위", range=[-5, 105])
+apply_common_layout(fig_profile, title=f"{selected_player} 커리어 프로파일 (본인 커리어 기준)", height=440)
+st.plotly_chart(fig_profile, use_container_width=True, theme=None)
+
+st.divider()
+
+# ---------------------------------------------------------------
+# 추가 지표 (단일 선택)
+# ---------------------------------------------------------------
+extra_choice = st.selectbox("추가로 볼 지표 선택 (선택)", options=["선택 안 함"] + list(extra_options.keys()))
+if extra_choice != "선택 안 함":
+    col = extra_options[extra_choice]
     fig_extra = go.Figure()
     fig_extra.add_trace(go.Scatter(
         x=player_df["year"], y=player_df[col], mode="lines+markers",
         line=dict(width=2, color=COLOR_SEQUENCE[2]), marker=dict(size=7),
     ))
     fig_extra.update_xaxes(title="시즌", dtick=1)
-    fig_extra.update_yaxes(title=label)
-    apply_common_layout(fig_extra, title=f"{selected_player} — {label} 추이", height=280)
+    fig_extra.update_yaxes(title=extra_choice)
+    apply_common_layout(fig_extra, title=f"{selected_player} — {extra_choice} 추이", height=320)
     st.plotly_chart(fig_extra, use_container_width=True, theme=None)
 
 st.divider()
 
 # ---------------------------------------------------------------
-# (참고) 포지션 대비 백분위 레이더
+# 포지션 대비 백분위 레이더 (동일 시즌·동일 포지션 동료와 비교)
 # ---------------------------------------------------------------
-with st.expander("🕸️ (참고) 포지션 대비 백분위 레이더 — 같은 시즌 동료 선수들과 비교"):
-    latest_season = player_df["year"].max()
-    latest_row = player_df[player_df["year"] == latest_season].iloc[0]
+st.subheader("🕸️ 포지션 대비 백분위 레이더")
+st.caption("위의 '커리어 프로파일'이 본인 과거와의 비교라면, 이 레이더는 **그 시즌에 다른 선수보다 얼마나 잘했는가**를 보여줍니다.")
 
-    cohort = (
-        df[(df["year"] == latest_season) & (df["positions_played"].str.contains(primary_pos, na=False))]
-        if primary_pos else df[df["year"] == latest_season]
+latest_season = player_df["year"].max()
+latest_row = player_df[player_df["year"] == latest_season].iloc[0]
+
+cohort = df[(df["year"] == latest_season) & (df["primary_position"] == primary_pos)] if primary_pos else df[df["year"] == latest_season]
+st.caption(f"비교 기준: {int(latest_season)} 시즌 · 주포지션 '{primary_pos}' 동료 {cohort['player_name'].nunique()}명 대비 백분위")
+
+
+def percentile_of(series, value, higher_is_better=True):
+    s = series.dropna()
+    if s.empty or pd.isna(value):
+        return 0
+    pct = (s < value).sum() / len(s) * 100 if higher_is_better else (s > value).sum() / len(s) * 100
+    return round(pct, 1)
+
+
+if is_pitcher:
+    radar_axes = {
+        "탈삼진율(K9)": ("pit_K9", True), "제구력(BB9↓)": ("pit_BB9", False),
+        "피홈런 억제(HR9↓)": ("pit_HR9", False), "ERA↓": ("pit_ERA", False), "WHIP↓": ("pit_WHIP", False),
+    }
+else:
+    radar_axes = {
+        "타율": ("hit_AVG", True), "출루율": ("hit_OBP", True), "장타율": ("hit_SLG", True),
+        "홈런": ("hit_HR", True), "OPS": ("hit_OPS", True),
+    }
+
+labels, values = [], []
+for label, (col, higher_better) in radar_axes.items():
+    if col not in df.columns:
+        continue
+    val = latest_row.get(col, np.nan)
+    pct = percentile_of(cohort[col], val, higher_is_better=higher_better)
+    labels.append(label)
+    values.append(pct)
+
+if labels:
+    radar_fig = go.Figure()
+    radar_fig.add_trace(go.Scatterpolar(
+        r=values + [values[0]], theta=labels + [labels[0]],
+        fill="toself", name=selected_player,
+        line=dict(color=COLOR_SEQUENCE[0], width=2), fillcolor="rgba(37, 99, 235, 0.25)",
+    ))
+    radar_fig.update_layout(
+        polar=dict(
+            radialaxis=dict(visible=True, range=[0, 100], ticksuffix="%", tickfont=dict(color="#374151")),
+            angularaxis=dict(tickfont=dict(color="#111827", size=12)),
+        ),
+        showlegend=False,
     )
-    st.caption(f"비교 기준: {int(latest_season)} 시즌 · 포지션 '{primary_pos}' 동료 {cohort['player_name'].nunique()}명 대비 백분위")
-
-    def percentile_of(series, value, higher_is_better=True):
-        s = series.dropna()
-        if s.empty or pd.isna(value):
-            return 0
-        pct = (s < value).sum() / len(s) * 100 if higher_is_better else (s > value).sum() / len(s) * 100
-        return round(pct, 1)
-
-    if is_pitcher:
-        radar_axes = {
-            "탈삼진율(K9)": ("pit_K9", True), "제구력(BB9↓)": ("pit_BB9", False),
-            "피홈런 억제(HR9↓)": ("pit_HR9", False), "ERA↓": ("pit_ERA", False), "WHIP↓": ("pit_WHIP", False),
-        }
-    else:
-        radar_axes = {
-            "타율": ("hit_AVG", True), "출루율": ("hit_OBP", True), "장타율": ("hit_SLG", True),
-            "홈런": ("hit_HR", True), "OPS": ("hit_OPS", True),
-        }
-
-    labels, values = [], []
-    for label, (col, higher_better) in radar_axes.items():
-        if col not in df.columns:
-            continue
-        val = latest_row.get(col, np.nan)
-        pct = percentile_of(cohort[col], val, higher_is_better=higher_better)
-        labels.append(label)
-        values.append(pct)
-
-    if labels:
-        radar_fig = go.Figure()
-        radar_fig.add_trace(go.Scatterpolar(
-            r=values + [values[0]], theta=labels + [labels[0]],
-            fill="toself", name=selected_player,
-            line=dict(color=COLOR_SEQUENCE[0], width=2), fillcolor="rgba(37, 99, 235, 0.25)",
-        ))
-        radar_fig.update_layout(
-            polar=dict(
-                radialaxis=dict(visible=True, range=[0, 100], ticksuffix="%", tickfont=dict(color="#374151")),
-                angularaxis=dict(tickfont=dict(color="#111827", size=12)),
-            ),
-            showlegend=False,
-        )
-        apply_common_layout(radar_fig, title=f"{selected_player} 포지션 대비 백분위 ({int(latest_season)})", height=460)
-        st.plotly_chart(radar_fig, use_container_width=True, theme=None)
-    else:
-        st.info("레이더 차트를 계산할 지표가 부족합니다.")
+    apply_common_layout(radar_fig, title=f"{selected_player} 포지션 대비 백분위 ({int(latest_season)})", height=460)
+    st.plotly_chart(radar_fig, use_container_width=True, theme=None)
+else:
+    st.info("레이더 차트를 계산할 지표가 부족합니다.")
 
 with st.expander("📋 원본 시즌별 기록 보기"):
     st.dataframe(player_df, use_container_width=True, hide_index=True)
