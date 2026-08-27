@@ -1,178 +1,105 @@
+"""
+app.py
+--------
+🏠 홈: 데이터 소개
+수업 도입부용 페이지. "이 데이터가 뭔지"를 카드/표/간단한 시각화로 보여줌.
+"""
+
 import streamlit as st
-import pandas as pd
+import plotly.graph_objects as go
 
-from utils.data_cleaner import get_full_panel
-from utils.variables import VARIABLES
+from utils.data_loader import load_data, get_years, get_teams
+from utils.style import apply_common_layout, COLOR_SEQUENCE
 
-st.set_page_config(
-    page_title="공공기관 계량분석 대시보드",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+st.set_page_config(page_title="KBO 데이터 대시보드", page_icon="⚾", layout="wide")
 
-st.title("📊 공공기관 계량분석 대시보드")
-st.markdown("##### 실제 공공기관 데이터로 질문을 만들고, 분포를 확인하고, 관계를 탐색하는 기초계량분석 실습 대시보드")
-st.divider()
+df = load_data()
+years = get_years(df)
+teams = get_teams(df)
 
-with st.spinner("데이터를 불러오는 중입니다..."):
-    panel = get_full_panel()
-
-used_cols = {v["column"] for v in VARIABLES.values() if v["column"] in panel.columns}
-
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("분석기관 수", f"{panel['기관명'].nunique():,}개")
-m2.metric("연도 범위", f"{panel['연도'].min()}–{panel['연도'].max()}")
-m3.metric("기관-연도 관측치", f"{panel.shape[0]:,}건")
-m4.metric("결합된 변수 수", f"{len(used_cols):,}개")
+st.title("⚾ KBO 리그 데이터 대시보드")
+st.caption("2001~2025 시즌, 선수 개인 기록 데이터를 활용한 야구 통계 탐색 · 교육용 대시보드")
 
 st.divider()
 
-# ---------------- 실데이터 기반 흥미유도 질문 ----------------
-st.markdown("### 🤔 이 데이터로 답할 수 있는 질문들")
+# ---------------------------------------------------------------
+# 기본 정보 카드
+# ---------------------------------------------------------------
+st.subheader("📦 데이터 한눈에 보기")
 
-latest_year = panel["연도"].max()
-earliest_year = panel["연도"].min()
-snap = panel[panel["연도"] == latest_year]
-
-
-def safe_ratio_top():
-    if "기관장직원보수배율" in snap.columns:
-        s = snap[["기관명", "기관장직원보수배율"]].dropna()
-        if not s.empty:
-            row = s.loc[s["기관장직원보수배율"].idxmax()]
-            return row["기관명"], row["기관장직원보수배율"]
-    return None, None
-
-
-def safe_gov_compare():
-    if "정부지원수입" in snap.columns and "정부지원의존도" in snap.columns:
-        s1 = snap[["기관명", "정부지원수입"]].dropna()
-        s2 = snap[["기관명", "정부지원의존도"]].dropna()
-        if not s1.empty and not s2.empty:
-            top_amt = s1.loc[s1["정부지원수입"].idxmax(), "기관명"]
-            top_ratio = s2.loc[s2["정부지원의존도"].idxmax(), "기관명"]
-            return top_amt, top_ratio
-    return None, None
-
-
-def safe_female_leave_by_type():
-    if "여성육아휴직사용자수" in panel.columns:
-        s = panel.groupby("기관유형")["여성육아휴직사용자수"].mean().dropna()
-        if not s.empty:
-            return s.idxmax(), s.max()
-    return None, None
-
-
-def safe_salary_growth_top():
-    col = "직원평균보수"
-    if col in panel.columns:
-        first = panel[panel["연도"] == earliest_year][["기관명", col]].dropna().rename(columns={col: "초기값"})
-        last = panel[panel["연도"] == latest_year][["기관명", col]].dropna().rename(columns={col: "최근값"})
-        merged = pd.merge(first, last, on="기관명")
-        merged = merged[merged["초기값"] > 0]
-        if not merged.empty:
-            merged["증가율"] = (merged["최근값"] - merged["초기값"]) / merged["초기값"] * 100
-            row = merged.loc[merged["증가율"].idxmax()]
-            return row["기관명"], row["증가율"]
-    return None, None
-
-
-q_org, q_ratio = safe_ratio_top()
-q_amt_org, q_ratio_org = safe_gov_compare()
-q_type, q_type_rate = safe_female_leave_by_type()
-q_growth_org, q_growth_rate = safe_salary_growth_top()
-
-qc1, qc2 = st.columns(2)
-qc3, qc4 = st.columns(2)
-
-with qc1:
-    if q_org:
-        st.info(f"💰 **기관장 연봉이 직원 평균보수의 몇 배?** — {latest_year}년 기준 **{q_org}**이(가) "
-                f"**{q_ratio:.1f}배**로 가장 높습니다.")
-    else:
-        st.info("💰 기관장 연봉은 직원 평균보수의 몇 배일까요? — [보수·복리후생·채용] 페이지에서 확인해보세요.")
-with qc2:
-    if q_amt_org and q_ratio_org:
-        same = "같습니다" if q_amt_org == q_ratio_org else "다릅니다"
-        st.info(f"🏛️ **정부지원수입 최다 기관과 정부지원의존도 최고 기관은 같을까?** — {same}. "
-                f"(수입 최다: {q_amt_org} / 의존도 최고: {q_ratio_org})")
-    else:
-        st.info("🏛️ 정부지원수입이 많은 기관과 정부지원의존도가 높은 기관은 같을까요?")
-with qc3:
-    if q_type:
-        st.info(f"👶 **여성 육아휴직 사용자 수가 가장 많은 기관유형은?** — **{q_type}** (평균 {q_type_rate:.1f}명)")
-    else:
-        st.info("👶 육아휴직 사용자 수가 많은 기관유형은 어디일까요?")
-with qc4:
-    if q_growth_org:
-        st.info(f"📈 **{earliest_year}~{latest_year}년, 평균보수가 가장 많이 오른 기관은?** — "
-                f"**{q_growth_org}** (+{q_growth_rate:.1f}%)")
-    else:
-        st.info("📈 최근 기간 평균보수가 가장 많이 상승한 기관은 어디일까요?")
-
-st.caption("💡 더 자세한 답은 좌측 사이드바의 각 분석 페이지에서 직접 탐색해보세요.")
-
-st.divider()
-
-# ---------------- 계량분석 핵심개념 ----------------
-st.markdown("### 📚 이 대시보드를 보기 전에: 계량분석 핵심개념")
 c1, c2, c3, c4 = st.columns(4)
-c5, c6, c7 = st.columns(3)
-
-with c1:
-    st.markdown("#### ① 평균과 중앙값")
-    st.caption("평균만으로 전체 분포를 설명할 수 있을까요? 극단값이 있으면 평균과 중앙값이 크게 달라집니다.")
-with c2:
-    st.markdown("#### ② 분포와 이상치")
-    st.caption("극단값(이상치)은 평균뿐 아니라 회귀분석 결과에도 큰 영향을 줄 수 있습니다.")
-with c3:
-    st.markdown("#### ③ 총액과 비율")
-    st.caption("기관 규모가 다른데 총액을 그대로 비교해도 될까요? '1인당' 지표가 필요한 이유입니다.")
-with c4:
-    st.markdown("#### ④ 집단 차이")
-    st.caption("기관유형별 평균 차이가 통계적으로 유의하다고 해서 그것이 곧 원인은 아닙니다.")
-with c5:
-    st.markdown("#### ⑤ 상관관계")
-    st.caption("두 변수가 함께 움직인다고 해서 인과관계라고 할 수 있을까요?")
-with c6:
-    st.markdown("#### ⑥ 통제변수")
-    st.caption("다른 조건(기관유형, 규모 등)을 고려하면 관계가 어떻게 달라질까요?")
-with c7:
-    st.markdown("#### ⑦ 시간 변화")
-    st.caption("기관 간의 차이와 동일 기관의 시간에 따른 변화는 같은 정보를 담고 있을까요?")
+c1.metric("전체 관측치(선수-시즌)", f"{len(df):,}건")
+c2.metric("등록 선수 수", f"{df['player_id'].nunique():,}명")
+c3.metric("시즌 범위", f"{years[0]} ~ {years[-1]}", help=f"{len(years)}개 시즌")
+c4.metric("구단 수(역대 명칭 포함)", f"{len(teams)}개")
 
 st.divider()
 
-st.markdown("### 페이지 안내")
-st.caption("페이지는 4개 섹션으로 묶여 있습니다. 모든 페이지를 매번 쓸 필요는 없고, 필요한 페이지만 골라 쓰는 '분석 모듈'이라고 보면 됩니다.")
+# ---------------------------------------------------------------
+# 데이터 구조 설명
+# ---------------------------------------------------------------
+st.subheader("🗂️ 데이터 구조")
 
 st.markdown("""
-**I. 데이터 이해**
-1. 기술통계 및 변수분포 — 선택한 변수는 어떤 분포를 갖는가? (일·가정양립 지표도 여기서 카테고리로 탐색 가능)
-2. 기관유형별 비교 — 기관유형에 따라 평균·분포가 다른가?
-3. 주무부처별 비교 — 주무부처별 산하기관은 어떻게 다른가? (기관유형×주무부처 교차분석 포함)
+이 데이터는 **선수 한 명이 한 시즌 동안 기록한 성적 한 줄**을 기본 단위로 합니다.
+컬럼은 크게 4개 그룹으로 나뉩니다.
 
-**II. 공공기관 주요 지표**
-4. 수입·지출 구조 — 기관별 재정규모와 수입구성은 어떻게 다른가?
-5. 법인세 분석 — 과세표준·결정세액은 어떻게 분포하고 연관되는가?
-6. 보수 및 복리후생 — 보수와 복리후생 수준은 기관별로 어떻게 다른가?
-7. 채용 및 인력구성 — 채용규모와 채용률·성별구성은 어떻게 다른가?
+| 그룹 | 접두어 | 예시 컬럼 | 설명 |
+|---|---|---|---|
+| 타격 | `hit_` | hit_AVG, hit_HR, hit_OPS | 타자로서 남긴 기록 |
+| 투구 | `pit_` | pit_ERA, pit_WHIP, pit_SO | 투수로서 남긴 기록 |
+| 수비 | `def_` | def_G, def_FPCT | 포지션별 수비 기록 |
+| 주루 | `run_` | run_SB, run_SB_pct | 도루 등 주루 기록 |
 
-**III. 탐색적 계량분석**
-8. 두 변수 관계분석 — 두 지표는 얼마나 함께 움직이는가?
-9. 집단별 관계 및 상관구조 — 전체 관계가 유형·부처 내부에서도 같은가? (부문간 관계 지도 포함)
-10. 기관 프로필 — 특정 기관은 전체·유형·부처에서 어디쯤인가?
-11. 연도별 수준 변화 — 지표 수준은 시간에 따라 어떻게 변했는가?
-12. 변화율 분석 — 어떤 기관의 변화가 크며, 순위는 안정적인가?
-
-**IV. 심화 계량분석**
-13. 다중회귀분석 — 통제 후에도 관계가 유지되는가?
-14. 패널데이터 분석 — 기관 간 차이와 기관 내부 변화는 어떻게 다른가?
+⚠️ 한 선수가 투수이면서 타석에 서거나(투수 타격), 여러 포지션을 겸하는 경우도 있어서
+`hit_*`/`pit_*` 컬럼이 동시에 값을 가질 수 있습니다. "이 선수가 투수인가 타자인가"는
+`primary_position` 컬럼(그 시즌 가장 많이 뛴 포지션) 기준으로 판단하시면 됩니다.
 """)
 
 st.divider()
-st.caption(
-    "좌측 사이드바 **Pages** 메뉴에서 각 분석 페이지로 이동하세요. "
-    "모든 페이지의 필터(연도·기관유형·주무부처·기관명)는 종속적으로 연동됩니다."
+
+# ---------------------------------------------------------------
+# 구단 변천사 시각화 (프랜차이즈 히스토리)
+# ---------------------------------------------------------------
+st.subheader("🏟️ 구단 변천사")
+st.caption("각 팀명이 어느 시즌까지 데이터에 존재하는지 보여줍니다. 팀 분석 시 이름이 바뀐 구단은 같은 팀으로 봐야 함을 알 수 있습니다.")
+
+team_span = (
+    df.groupby("team")["year"].agg(["min", "max"]).reset_index()
+    .sort_values("min")
 )
+
+fig_span = go.Figure()
+for i, row in team_span.iterrows():
+    fig_span.add_trace(go.Scatter(
+        x=[row["min"], row["max"]], y=[row["team"], row["team"]],
+        mode="lines+markers",
+        line=dict(color=COLOR_SEQUENCE[i % len(COLOR_SEQUENCE)], width=8),
+        marker=dict(size=10),
+        showlegend=False,
+    ))
+fig_span.update_xaxes(title="연도", dtick=2)
+fig_span.update_yaxes(title="")
+apply_common_layout(fig_span, height=420)
+st.plotly_chart(fig_span, use_container_width=True, theme=None)
+
+st.divider()
+
+# ---------------------------------------------------------------
+# 연도별 등록 선수 수 (리그 확장 추이)
+# ---------------------------------------------------------------
+st.subheader("📈 연도별 등록 선수 수")
+st.caption("리그에 참여한 구단 수가 늘어나며(8개→10개) 등록 선수 수도 함께 늘어난 것을 볼 수 있습니다.")
+
+player_count = df.groupby("year")["player_id"].nunique().reset_index()
+fig_count = go.Figure(go.Bar(
+    x=player_count["year"], y=player_count["player_id"],
+    marker_color=COLOR_SEQUENCE[0],
+))
+fig_count.update_xaxes(title="연도", dtick=2)
+fig_count.update_yaxes(title="등록 선수 수(명)")
+apply_common_layout(fig_count, height=380)
+st.plotly_chart(fig_count, use_container_width=True, theme=None)
+
+st.divider()
+st.markdown("### 👈 왼쪽 사이드바에서 다른 페이지로 이동해서 더 자세한 분석을 확인해보세요.")
